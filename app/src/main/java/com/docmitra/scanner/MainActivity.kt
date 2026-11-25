@@ -1,15 +1,22 @@
 package com.docmitra.scanner
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.MediaStore
 import android.view.Gravity
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
@@ -18,6 +25,7 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,6 +59,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         recentDocsContainer = findViewById(R.id.recentDocsContainer)
+        findViewById<TextView>(R.id.tvRecentHeading).text = "SAVED DOCUMENTS IN APP"
 
         val btnLangToggle = findViewById<MaterialButton>(R.id.btnLangToggle)
         val cardCamScan = findViewById<MaterialCardView>(R.id.cardCamScan)
@@ -93,12 +102,13 @@ class MainActivity : AppCompatActivity() {
     private fun loadSavedDocuments() {
         recentDocsContainer.removeAllViews()
         val dir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
-        val files = dir.listFiles { file -> file.extension.equals("pdf", ignoreCase = true) }
-            ?.sortedByDescending { it.lastModified() }
+        val files = dir.listFiles { file ->
+            file.extension.equals("pdf", ignoreCase = true) || file.extension.equals("jpg", ignoreCase = true)
+        }?.sortedByDescending { it.lastModified() }
 
         if (files.isNullOrEmpty()) {
             val emptyTv = TextView(this).apply {
-                text = if (isHindi) "अभी कोई PDF सेव नहीं है। ऊपर SCAN दबाकर शुरू करें।" else "No saved PDFs yet. Tap SCAN above to create your first document."
+                text = if (isHindi) "अभी ऐप में कोई डॉक्यूमेंट सेव नहीं है। ऊपर SCAN दबाकर शुरू करें।" else "No saved documents yet. Tap SCAN above to create & save your first document."
                 setTextColor(0xFF94A3B8.toInt())
                 textSize = 13f
                 setPadding(8, 12, 8, 12)
@@ -107,7 +117,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        for (file in files.take(10)) {
+        for (file in files) {
+            val isPdf = file.extension.equals("pdf", ignoreCase = true)
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -123,12 +134,23 @@ class MainActivity : AppCompatActivity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(36, 30, 36, 30)
+                setPadding(30, 26, 30, 26)
+            }
+
+            val badgeTv = TextView(this).apply {
+                text = if (isPdf) "PDF" else "JPG"
+                setTextColor(if (isPdf) 0xFFDC2626.toInt() else 0xFF059669.toInt())
+                setBackgroundColor(if (isPdf) 0xFFFEE2E2.toInt() else 0xFFD1FAE5.toInt())
+                textSize = 11f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(18, 10, 18, 10)
             }
 
             val infoCol = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = 24
+                }
             }
 
             val titleTv = TextView(this).apply {
@@ -139,7 +161,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(file.lastModified()))
-            val sizeKb = file.length() / 1024
+            val sizeKb = (file.length() / 1024).coerceAtLeast(1)
             val subTv = TextView(this).apply {
                 text = "$dateStr • ${sizeKb} KB"
                 setTextColor(0xFF64748B.toInt())
@@ -149,25 +171,44 @@ class MainActivity : AppCompatActivity() {
             infoCol.addView(titleTv)
             infoCol.addView(subTv)
 
-            val shareBtn = MaterialButton(this).apply {
-                text = if (isHindi) "शेयर" else "Share"
-                textSize = 11f
-                setBackgroundColor(0xFFEFF6FF.toInt())
-                setTextColor(0xFF2563EB.toInt())
-                cornerRadius = (16f * resources.displayMetrics.density).toInt()
-                setOnClickListener { sharePdfFile(file) }
+            val moreBtn = MaterialButton(this).apply {
+                text = "⋮"
+                textSize = 16f
+                minWidth = 0
+                setBackgroundColor(0xFFF1F5F9.toInt())
+                setTextColor(0xFF0F172A.toInt())
+                cornerRadius = (12f * resources.displayMetrics.density).toInt()
+                setOnClickListener { showDocumentOptions(file, isPdf) }
             }
 
+            row.addView(badgeTv)
             row.addView(infoCol)
-            row.addView(shareBtn)
+            row.addView(moreBtn)
             card.addView(row)
-            card.setOnClickListener { openPdfFile(file) }
+            card.setOnClickListener { openDocument(file, isPdf) }
 
             recentDocsContainer.addView(card)
         }
     }
 
-    private fun openPdfFile(file: File) {
+    private fun openDocument(file: File, isPdf: Boolean) {
+        if (!isPdf) {
+            val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
+            val iv = ImageView(this).apply {
+                setImageBitmap(bmp)
+                adjustViewBounds = true
+                setPadding(16, 16, 16, 16)
+            }
+            AlertDialog.Builder(this)
+                .setTitle(file.name)
+                .setView(iv)
+                .setPositiveButton("Save to Gallery") { _, _ -> saveImageFileToGallery(file) }
+                .setNeutralButton("Share") { _, _ -> shareDocumentFile(file, false) }
+                .setNegativeButton("Close", null)
+                .show()
+            return
+        }
+
         try {
             val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
             val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -180,14 +221,60 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sharePdfFile(file: File) {
+    private fun showDocumentOptions(file: File, isPdf: Boolean) {
+        val options = if (isPdf) {
+            arrayOf("Open PDF", "Share PDF", "Delete from App")
+        } else {
+            arrayOf("View Photo", "Save to Gallery", "Share Photo", "Delete from App")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(file.name)
+            .setItems(options) { _, which ->
+                when (options[which]) {
+                    "Open PDF", "View Photo" -> openDocument(file, isPdf)
+                    "Save to Gallery" -> saveImageFileToGallery(file)
+                    "Share PDF", "Share Photo" -> shareDocumentFile(file, isPdf)
+                    "Delete from App" -> {
+                        file.delete()
+                        Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
+                        loadSavedDocuments()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun saveImageFileToGallery(file: File) {
+        try {
+            val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, file.name)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocMitra")
+                }
+                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) } }
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
+                if (!dir.exists()) dir.mkdirs()
+                FileOutputStream(File(dir, file.name)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
+            }
+            Toast.makeText(this, "Saved to Gallery (Pictures/DocMitra)!", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Gallery save error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun shareDocumentFile(file: File, isPdf: Boolean) {
         val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/pdf"
+            type = if (isPdf) "application/pdf" else "image/jpeg"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        startActivity(Intent.createChooser(intent, "Share PDF"))
+        startActivity(Intent.createChooser(intent, "Share Document"))
     }
 
     private fun setupUtilityCards() {
@@ -227,7 +314,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvHeroTitle).text =
             if (isHindi) "स्मार्ट क्लियर कैम स्कैनर" else "Smart Clear Cam Scanner"
         findViewById<TextView>(R.id.tvHeroDesc).text =
-            if (isHindi) "ऑटो-क्रॉप • लाइव फिल्टर • तुरंत PDF/JPG" else "Auto-Crop • Live Filters • Instant PDF/JPG"
+            if (isHindi) "ऑटो-क्रॉप • HD फिल्टर • ऐप व गैलरी सेव" else "Auto-Crop • HD Filters • Save in App & Gallery"
         findViewById<TextView>(R.id.tvTool1).text =
             if (isHindi) "फोटो साइज कम\nकरें (KB)" else "Photo & Image\nCompress (KB)"
         findViewById<TextView>(R.id.tvTool2).text =
