@@ -24,7 +24,7 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <!-- Branded Vector Logo -->
+            <!-- Branded Logo -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="44dp"
                 android:layout_height="44dp"
@@ -114,7 +114,7 @@
                 android:orientation="horizontal"
                 android:padding="16dp">
 
-                <!-- Highlighted White Icon Box with Green/Orange HD Camera Lens -->
+                <!-- Highlighted White Icon Box with HD Camera Lens -->
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="54dp"
                     android:layout_height="54dp"
@@ -123,9 +123,10 @@
                     app:cardElevation="2dp">
 
                     <ImageView
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
                         android:layout_gravity="center"
+                        android:scaleType="fitCenter"
                         android:src="@drawable/ic_hd_scanner_cam" />
                 </com.google.android.material.card.MaterialCardView>
 
@@ -211,7 +212,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardPhotoCompress"
                     android:layout_width="0dp"
-                    android:layout_height="104dp"
+                    android:layout_height="112dp"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -228,16 +229,16 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="30dp"
-                            android:layout_height="30dp"
-                            android:src="@android:drawable/ic_menu_crop"
-                            app:tint="#14532D" />
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_tool_compress" />
 
                         <TextView
                             android:id="@+id/tvTool1"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="Photo &amp; Image\nCompress (KB)"
                             android:textColor="#1E293B"
@@ -249,7 +250,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardExamPhoto"
                     android:layout_width="0dp"
-                    android:layout_height="104dp"
+                    android:layout_height="112dp"
                     android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -266,16 +267,16 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="30dp"
-                            android:layout_height="30dp"
-                            android:src="@android:drawable/ic_menu_edit"
-                            app:tint="#EA580C" />
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_tool_exam" />
 
                         <TextView
                             android:id="@+id/tvTool2"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="Exam Photo &amp;\nName / Date"
                             android:textColor="#1E293B"
@@ -295,7 +296,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardImgToPdf"
                     android:layout_width="0dp"
-                    android:layout_height="104dp"
+                    android:layout_height="112dp"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -312,16 +313,16 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="30dp"
-                            android:layout_height="30dp"
-                            android:src="@android:drawable/ic_menu_gallery"
-                            app:tint="#EA580C" />
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_tool_img_pdf" />
 
                         <TextView
                             android:id="@+id/tvTool3"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="Image to PDF\nMaker"
                             android:textColor="#1E293B"
@@ -333,7 +334,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardIdMerger"
                     android:layout_width="0dp"
-                    android:layout_height="104dp"
+                    android:layout_height="112dp"
                     android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -350,16 +351,16 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="30dp"
-                            android:layout_height="30dp"
-                            android:src="@android:drawable/ic_menu_agenda"
-                            app:tint="#14532D" />
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_tool_id_merge" />
 
                         <TextView
                             android:id="@+id/tvTool4"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="ID Card Front\n&amp; Back Merger"
                             android:textColor="#1E293B"
@@ -379,7 +380,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardPdfTools"
                     android:layout_width="0dp"
-                    android:layout_height="104dp"
+                    android:layout_height="112dp"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -396,16 +397,16 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="30dp"
-                            android:layout_height="30dp"
-                            android:src="@android:drawable/ic_menu_manage"
-                            app:tint="#14532D" />
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_tool_pdf_tools" />
 
                         <TextView
                             android:id="@+id/tvTool5"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="PDF Compress,\nMerge &amp; Lock"
                             android:textColor="#1E293B"
@@ -417,7 +418,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardIdVault"
                     android:layout_width="0dp"
-                    android:layout_height="104dp"
+                    android:layout_height="112dp"
                     android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -434,16 +435,16 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="30dp"
-                            android:layout_height="30dp"
-                            android:src="@android:drawable/ic_lock_idle_lock"
-                            app:tint="#EA580C" />
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_tool_vault" />
 
                         <TextView
                             android:id="@+id/tvTool6"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="My ID Vault\n(Fingerprint)"
                             android:textColor="#1E293B"
