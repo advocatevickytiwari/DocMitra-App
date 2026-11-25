@@ -38,7 +38,6 @@ class MainActivity : AppCompatActivity() {
                 for (page in pages) {
                     uriList.add(page.imageUri.toString())
                 }
-                // Open custom Scan Studio with horizontal filter strip & save options
                 val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
                     putStringArrayListExtra("SCAN_URIS", uriList)
                 }
@@ -192,13 +191,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUtilityCards() {
-        val msg = "Coming in next module update!"
         findViewById<MaterialCardView>(R.id.cardPhotoCompress).setOnClickListener {
-            Toast.makeText(this, "Photo & KB Compressor: $msg", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, PhotoStudioActivity::class.java))
         }
         findViewById<MaterialCardView>(R.id.cardExamPhoto).setOnClickListener {
-            Toast.makeText(this, "Exam Name/Date Maker: $msg", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, PhotoStudioActivity::class.java))
         }
+        val msg = "Coming in next module update!"
         findViewById<MaterialCardView>(R.id.cardImgToPdf).setOnClickListener {
             Toast.makeText(this, "Image to PDF: $msg", Toast.LENGTH_SHORT).show()
         }
