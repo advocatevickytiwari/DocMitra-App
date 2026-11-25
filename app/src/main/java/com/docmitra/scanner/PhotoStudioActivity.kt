@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -20,6 +21,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -49,6 +51,18 @@ class PhotoStudioActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_photo_studio)
+
+        val mode = intent.getStringExtra("MODE") ?: "COMPRESS"
+        val tvTitle = findViewById<TextView>(R.id.tvStudioTitle)
+        val cardExamInputs = findViewById<MaterialCardView>(R.id.cardExamInputs)
+
+        if (mode == "EXAM") {
+            tvTitle.text = "Exam Photo Name & Date"
+            cardExamInputs.visibility = View.VISIBLE
+        } else {
+            tvTitle.text = "Photo KB Compressor"
+            cardExamInputs.visibility = View.GONE
+        }
 
         ivPreview = findViewById(R.id.ivPhotoPreview)
         tvSizeInfo = findViewById(R.id.tvSizeInfo)
@@ -84,14 +98,13 @@ class PhotoStudioActivity : AppCompatActivity() {
             saveOutputToGallery()
         }
 
-        // Open gallery picker automatically on launch
         pickImageLauncher.launch("image/*")
     }
 
     private fun loadSelectedImage(uri: Uri) {
         try {
             val rawBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return
-            originalSizeKb = rawBytes.size / 1024
+            originalSizeKb = (rawBytes.size / 1024).coerceAtLeast(1)
             val bmp = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return
             baseBitmap = bmp
             workingBitmap = bmp
@@ -163,9 +176,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         }
 
         val targetBytes = targetKb * 1024
-        var outputBytes: ByteArray
-
-        // Step 1: Try quality reduction first
         var minQ = 10
         var maxQ = 98
         var bestBytes: ByteArray? = null
@@ -183,7 +193,6 @@ class PhotoStudioActivity : AppCompatActivity() {
             }
         }
 
-        // Step 2: If even Q=10 is larger than targetKb, downscale dimensions smoothly
         while (bestBytes == null && bmp.width > 120 && bmp.height > 120) {
             bmp = Bitmap.createScaledBitmap(bmp, (bmp.width * 0.80).toInt(), (bmp.height * 0.80).toInt(), true)
             val baos = ByteArrayOutputStream()
@@ -194,7 +203,7 @@ class PhotoStudioActivity : AppCompatActivity() {
             }
         }
 
-        outputBytes = bestBytes ?: run {
+        val outputBytes = bestBytes ?: run {
             val baos = ByteArrayOutputStream()
             bmp.compress(Bitmap.CompressFormat.JPEG, 50, baos)
             baos.toByteArray()
