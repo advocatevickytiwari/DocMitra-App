@@ -1,9 +1,10 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.DocMitra" parent="Theme.Material3.Light.NoActionBar">
-        <item name="colorPrimary">#1A56DB</item>
-        <item name="colorPrimaryContainer">#E1EFFE</item>
+        <item name="colorPrimary">#14532D</item>
         <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorSecondary">#0E9F6E</item>
-        <item name="android:statusBarColor">#1A56DB</item>
+        <item name="colorSecondary">#EA580C</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="android:statusBarColor">#14532D</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
     </style>
 </resources>
