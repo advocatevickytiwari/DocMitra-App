@@ -1,7 +1,6 @@
 package com.docmitra.scanner
 
 import android.app.Activity
-import android.app.KeyguardManager
 import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
@@ -203,25 +202,22 @@ class MainActivity : AppCompatActivity() {
             })
         }
         findViewById<MaterialCardView>(R.id.cardImgToPdf).setOnClickListener {
-            startActivity(Intent(this, PdfIdStudioActivity::class.java))
+            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply {
+                putExtra("MODE", "IMG_TO_PDF")
+            })
         }
         findViewById<MaterialCardView>(R.id.cardIdMerger).setOnClickListener {
-            startActivity(Intent(this, PdfIdStudioActivity::class.java))
+            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply {
+                putExtra("MODE", "ID_MERGE")
+            })
         }
         findViewById<MaterialCardView>(R.id.cardPdfTools).setOnClickListener {
-            startActivity(Intent(this, PdfIdStudioActivity::class.java))
+            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply {
+                putExtra("MODE", "PDF_TOOLS")
+            })
         }
         findViewById<MaterialCardView>(R.id.cardIdVault).setOnClickListener {
-            val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-            if (km.isKeyguardSecure) {
-                val intent = km.createConfirmDeviceCredentialIntent(
-                    "DocMitra Secure Vault",
-                    "Verify fingerprint or screen lock to access your saved IDs"
-                )
-                if (intent != null) startActivity(intent)
-            } else {
-                Toast.makeText(this, "Please set a Phone Screen Lock / Fingerprint first for Vault security", Toast.LENGTH_LONG).show()
-            }
+            startActivity(Intent(this, VaultActivity::class.java))
         }
     }
 
