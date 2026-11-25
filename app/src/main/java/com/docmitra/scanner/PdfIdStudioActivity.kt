@@ -8,11 +8,13 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.View
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
@@ -22,6 +24,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 
@@ -53,9 +57,46 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
+    private val pickSinglePdfForCompress = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { compressSelectedPdf(it) }
+    }
+
+    private val pickMultiPdfsForMerge = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.size >= 2) {
+            mergeSelectedPdfs(uris)
+        } else if (uris.isNotEmpty()) {
+            Toast.makeText(this, "Please select at least 2 PDF files to merge", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_pdf_id_studio)
+
+        val mode = intent.getStringExtra("MODE") ?: "IMG_TO_PDF"
+        val tvTitle = findViewById<TextView>(R.id.tvPdfIdTitle)
+        val cardId = findViewById<MaterialCardView>(R.id.cardSectionIdMerge)
+        val cardImg = findViewById<MaterialCardView>(R.id.cardSectionImgPdf)
+        val cardTools = findViewById<MaterialCardView>(R.id.cardSectionPdfTools)
+
+        cardId.visibility = View.GONE
+        cardImg.visibility = View.GONE
+        cardTools.visibility = View.GONE
+
+        when (mode) {
+            "ID_MERGE" -> {
+                tvTitle.text = "ID Card Front & Back Merger"
+                cardId.visibility = View.VISIBLE
+            }
+            "PDF_TOOLS" -> {
+                tvTitle.text = "PDF Compress & Merge"
+                cardTools.visibility = View.VISIBLE
+            }
+            else -> {
+                tvTitle.text = "Image to PDF Maker"
+                cardImg.visibility = View.VISIBLE
+            }
+        }
 
         findViewById<ImageButton>(R.id.btnBackPdfId).setOnClickListener { finish() }
 
@@ -75,6 +116,13 @@ class PdfIdStudioActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnCreateMultiPdf).setOnClickListener {
             convertMultiImagesToPdf()
         }
+
+        findViewById<MaterialButton>(R.id.btnPickSinglePdf).setOnClickListener {
+            pickSinglePdfForCompress.launch("application/pdf")
+        }
+        findViewById<MaterialButton>(R.id.btnPickMultiPdfs).setOnClickListener {
+            pickMultiPdfsForMerge.launch("application/pdf")
+        }
     }
 
     private fun loadBitmapFromUri(uri: Uri): Bitmap? {
@@ -93,7 +141,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
             return
         }
 
-        // Standard A4 canvas (1240 x 1754 px at 150 DPI)
         val a4Width = 1240
         val a4Height = 1754
         val pageBitmap = Bitmap.createBitmap(a4Width, a4Height, Bitmap.Config.ARGB_8888)
@@ -135,6 +182,63 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
+    private fun compressSelectedPdf(uri: Uri) {
+        try {
+            val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return
+            val renderer = PdfRenderer(pfd)
+            val compressedPages = mutableListOf<Bitmap>()
+
+            for (i in 0 until renderer.pageCount) {
+                val page = renderer.openPage(i)
+                val targetW = (page.width * 1.2f).toInt().coerceAtMost(1100)
+                val targetH = (page.height * 1.2f).toInt().coerceAtMost(1550)
+                val bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                bmp.eraseColor(Color.WHITE)
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                page.close()
+
+                // Compress each rendered page via JPEG 55% quality
+                val baos = ByteArrayOutputStream()
+                bmp.compress(Bitmap.CompressFormat.JPEG, 55, baos)
+                val bytes = baos.toByteArray()
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { compressedPages.add(it) }
+            }
+            renderer.close()
+            pfd.close()
+
+            if (compressedPages.isNotEmpty()) {
+                saveBitmapsAsPdf(compressedPages, "DocMitra_Compressed_${System.currentTimeMillis()}.pdf")
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "PDF Compress Error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun mergeSelectedPdfs(uris: List<Uri>) {
+        try {
+            val mergedPages = mutableListOf<Bitmap>()
+            for (uri in uris) {
+                val pfd = contentResolver.openFileDescriptor(uri, "r") ?: continue
+                val renderer = PdfRenderer(pfd)
+                for (i in 0 until renderer.pageCount) {
+                    val page = renderer.openPage(i)
+                    val bmp = Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888)
+                    bmp.eraseColor(Color.WHITE)
+                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+                    mergedPages.add(bmp)
+                }
+                renderer.close()
+                pfd.close()
+            }
+            if (mergedPages.isNotEmpty()) {
+                saveBitmapsAsPdf(mergedPages, "DocMitra_Merged_${System.currentTimeMillis()}.pdf")
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "PDF Merge Error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun saveBitmapsAsPdf(bitmaps: List<Bitmap>, fileName: String) {
         val pdfDocument = PdfDocument()
         try {
@@ -171,7 +275,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
     private fun showShareDialog(file: File) {
         val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
         AlertDialog.Builder(this)
-            .setTitle("PDF Ready")
+            .setTitle("PDF Saved (${file.length() / 1024} KB)")
             .setMessage("Saved to Documents/DocMitra/${file.name}")
             .setPositiveButton("Share PDF") { _, _ ->
                 val share = Intent(Intent.ACTION_SEND).apply {
