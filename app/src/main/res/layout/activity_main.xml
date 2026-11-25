@@ -201,7 +201,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
                             android:gravity="center"
-                            android:text="Exam Photo &\nName/Date"
+                            android:text="Exam Photo &amp;\nName/Date"
                             android:textColor="#111827"
                             android:textSize="13sp"
                             android:textStyle="bold" />
