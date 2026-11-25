@@ -1,30 +1,31 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Deep Forest Green Base -->
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- Deep Forest Green Scanner Frame Corners -->
     <path
         android:fillColor="#14532D"
-        android:pathData="M0,0h108v108h-108z" />
-    <!-- Subtle Emerald Tech Diagonal -->
+        android:pathData="M6,14 L6,8 C6,6.9 6.9,6 8,6 L14,6 L14,9 L9,9 L9,14 Z M34,6 L40,6 C41.1,6 42,6.9 42,8 L42,14 L39,14 L39,9 L34,9 Z M6,34 L9,34 L9,39 L14,39 L14,42 L8,42 C6.9,42 6,41.1 6,40 Z M39,34 L42,34 L42,40 C42,41.1 41.1,42 40,42 L34,42 L34,39 L39,39 Z" />
+
+    <!-- Modern Camera Body in Forest Green -->
     <path
         android:fillColor="#166534"
-        android:pathData="M0,0 L108,0 L108,52 L0,84 Z" />
-    <!-- Crisp White Document Sheet -->
+        android:pathData="M13,17 L17,17 L19,14 L29,14 L31,17 L35,17 C36.65,17 38,18.35 38,20 L38,32 C38,33.65 36.65,35 35,35 L13,35 C11.35,35 10,33.65 10,32 L10,20 C10,18.35 11.35,17 13,17 Z" />
+
+    <!-- Outer Lens Ring -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M34,24 L62,24 L74,36 L74,84 L34,84 Z" />
-    <!-- Vibrant Orange Folded Corner -->
-    <path
-        android:fillColor="#EA580C"
-        android:pathData="M62,24 L62,36 L74,36 Z" />
-    <!-- Deep Green Text Lines -->
+        android:pathData="M24,20 C20.69,20 18,22.69 18,26 C18,29.31 20.69,32 24,32 C27.31,32 30,29.31 30,26 C30,22.69 27.31,20 24,20 Z" />
+
+    <!-- Inner Glass Lens -->
     <path
         android:fillColor="#14532D"
-        android:pathData="M42,46 L66,46 L66,50 L42,50 Z M42,56 L66,56 L66,60 L42,60 Z M42,66 L56,66 L56,70 L42,70 Z" />
-    <!-- Vibrant Orange High-Tech Scan Laser Line -->
+        android:pathData="M24,22.5 C22.07,22.5 20.5,24.07 20.5,26 C20.5,27.93 22.07,29.5 24,29.5 C25.93,29.5 27.5,27.93 27.5,26 C27.5,24.07 25.93,22.5 24,22.5 Z" />
+
+    <!-- Vibrant Orange Flash/Laser Dot -->
     <path
         android:fillColor="#EA580C"
-        android:pathData="M25,53 L83,53 L83,56.5 L25,56.5 Z" />
+        android:pathData="M33,20.5 C32.17,20.5 31.5,21.17 31.5,22 C31.5,22.83 32.17,23.5 33,23.5 C33.83,23.5 34.5,22.83 34.5,22 C34.5,21.17 33.83,20.5 33,20.5 Z" />
 </vector>
