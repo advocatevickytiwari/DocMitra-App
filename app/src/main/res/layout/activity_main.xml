@@ -24,10 +24,10 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <!-- Branded Logo -->
+            <!-- Branded 3D App Logo -->
             <com.google.android.material.card.MaterialCardView
-                android:layout_width="44dp"
-                android:layout_height="44dp"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
                 app:cardCornerRadius="12dp"
                 app:cardElevation="2dp">
 
@@ -35,7 +35,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:scaleType="centerCrop"
-                    android:src="@drawable/ic_docmitra_logo" />
+                    android:src="@drawable/ic_app_logo_3d" />
             </com.google.android.material.card.MaterialCardView>
 
             <LinearLayout
@@ -114,20 +114,20 @@
                 android:orientation="horizontal"
                 android:padding="16dp">
 
-                <!-- Highlighted White Icon Box with HD Camera Lens -->
+                <!-- Highlighted White Icon Box with 3D HD Camera Lens -->
                 <com.google.android.material.card.MaterialCardView
-                    android:layout_width="54dp"
-                    android:layout_height="54dp"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
                     app:cardBackgroundColor="#FFFFFF"
                     app:cardCornerRadius="14dp"
                     app:cardElevation="2dp">
 
                     <ImageView
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:layout_gravity="center"
                         android:scaleType="fitCenter"
-                        android:src="@drawable/ic_hd_scanner_cam" />
+                        android:src="@drawable/ic_cam_lens_3d" />
                 </com.google.android.material.card.MaterialCardView>
 
                 <LinearLayout
@@ -229,8 +229,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_compress" />
 
@@ -267,8 +267,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_exam" />
 
@@ -313,8 +313,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_img_pdf" />
 
@@ -351,8 +351,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_id_merge" />
 
@@ -397,8 +397,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_pdf_tools" />
 
@@ -435,8 +435,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_vault" />
 
