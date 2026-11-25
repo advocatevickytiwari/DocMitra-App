@@ -8,8 +8,8 @@
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
-        android:icon="@drawable/ic_docmitra_logo"
-        android:roundIcon="@drawable/ic_docmitra_logo"
+        android:icon="@drawable/ic_app_logo_3d"
+        android:roundIcon="@drawable/ic_app_logo_3d"
         android:label="DocMitra"
         android:supportsRtl="true"
         android:theme="@style/Theme.DocMitra">
