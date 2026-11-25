@@ -2,86 +2,83 @@ package com.docmitra.scanner
 
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.view.Gravity
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
-import com.docmitra.scanner.databinding.ActivityMainBinding
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.File
-import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding
     private var isHindi = false
+    private lateinit var recentDocsContainer: LinearLayout
 
     private val scannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-            scanResult?.pdf?.let { pdf ->
-                shareScannedPdf(pdf.uri)
+            val pages = scanResult?.pages
+            if (!pages.isNullOrEmpty()) {
+                val uriList = ArrayList<String>()
+                for (page in pages) {
+                    uriList.add(page.imageUri.toString())
+                }
+                // Open custom Scan Studio with horizontal filter strip & save options
+                val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
+                    putStringArrayListExtra("SCAN_URIS", uriList)
+                }
+                startActivity(studioIntent)
             }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        setContentView(R.layout.activity_main)
 
-        setupClicks()
-    }
+        recentDocsContainer = findViewById(R.id.recentDocsContainer)
 
-    private fun setupClicks() {
-        // 1. Live Smart Clear Cam Scanner (ML Kit with Auto-Crop & Clear Filters)
-        binding.cardCamScan.setOnClickListener {
-            startClearDocumentScanner()
-        }
+        val btnLangToggle = findViewById<MaterialButton>(R.id.btnLangToggle)
+        val cardCamScan = findViewById<MaterialCardView>(R.id.cardCamScan)
 
-        // 2. Language Toggle (English <-> Hindi)
-        binding.btnLangToggle.setOnClickListener {
+        btnLangToggle.setOnClickListener {
             isHindi = !isHindi
-            updateLanguageUI()
+            updateLanguage()
         }
 
-        // Upcoming Phase 2-4 Modules
-        binding.cardPhotoCompress.setOnClickListener {
-            showToast(if (isHindi) "Photo Compress अगले अपडेट में जुड़ रहा है" else "Photo Compress module ready in Phase 2")
+        cardCamScan.setOnClickListener {
+            startDocumentScanner()
         }
-        binding.cardExamPhoto.setOnClickListener {
-            showToast(if (isHindi) "Exam Photo Maker अगले अपडेट में जुड़ रहा है" else "Exam Photo Maker ready in Phase 2")
-        }
-        binding.cardImgToPdf.setOnClickListener {
-            showToast(if (isHindi) "Image to PDF अगले अपडेट में जुड़ रहा है" else "Image to PDF ready in Phase 3")
-        }
-        binding.cardIdMerger.setOnClickListener {
-            showToast(if (isHindi) "ID Card Merger अगले अपडेट में जुड़ रहा है" else "ID Card Merger ready in Phase 3")
-        }
-        binding.cardPdfTools.setOnClickListener {
-            showToast(if (isHindi) "PDF Tools अगले अपडेट में जुड़ रहा है" else "PDF Tools ready in Phase 4")
-        }
-        binding.cardIdVault.setOnClickListener {
-            showToast(if (isHindi) "ID Vault अगले अपडेट में जुड़ रहा है" else "ID Vault ready in Phase 4")
-        }
+
+        setupUtilityCards()
     }
 
-    private fun startClearDocumentScanner() {
+    override fun onResume() {
+        super.onResume()
+        loadSavedDocuments()
+    }
+
+    private fun startDocumentScanner() {
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(20)
-            .setResultFormats(
-                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
-                GmsDocumentScannerOptions.RESULT_FORMAT_PDF
-            )
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE_WITH_FILTER)
             .build()
 
         val scanner = GmsDocumentScanning.getClient(options)
@@ -90,59 +87,151 @@ class MainActivity : AppCompatActivity() {
                 scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
             }
             .addOnFailureListener { e ->
-                showToast("Scanner Error: ${e.localizedMessage}")
+                Toast.makeText(this, "Scanner initializing, please try again: ${e.message}", Toast.LENGTH_LONG).show()
             }
     }
 
-    private fun shareScannedPdf(pdfUri: Uri) {
-        try {
-            val outFile = File(cacheDir, "DocMitra_Scan_${System.currentTimeMillis()}.pdf")
-            contentResolver.openInputStream(pdfUri)?.use { input ->
-                FileOutputStream(outFile).use { output ->
-                    input.copyTo(output)
-                }
+    private fun loadSavedDocuments() {
+        recentDocsContainer.removeAllViews()
+        val dir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
+        val files = dir.listFiles { file -> file.extension.equals("pdf", ignoreCase = true) }
+            ?.sortedByDescending { it.lastModified() }
+
+        if (files.isNullOrEmpty()) {
+            val emptyTv = TextView(this).apply {
+                text = if (isHindi) "अभी कोई PDF सेव नहीं है। ऊपर SCAN दबाकर शुरू करें।" else "No saved PDFs yet. Tap SCAN above to create your first document."
+                setTextColor(0xFF94A3B8.toInt())
+                textSize = 13f
+                setPadding(8, 12, 8, 12)
             }
-            val contentUri = FileProvider.getUriForFile(
-                this,
-                "${packageName}.fileprovider",
-                outFile
-            )
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, contentUri)
+            recentDocsContainer.addView(emptyTv)
+            return
+        }
+
+        for (file in files.take(10)) {
+            val card = MaterialCardView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = 10 }
+                radius = 12f * resources.displayMetrics.density
+                cardElevation = 1f * resources.displayMetrics.density
+                setCardBackgroundColor(0xFFFFFFFF.toInt())
+                strokeColor = 0xFFE2E8F0.toInt()
+                strokeWidth = (1f * resources.displayMetrics.density).toInt()
+            }
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(36, 30, 36, 30)
+            }
+
+            val infoCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val titleTv = TextView(this).apply {
+                text = file.name
+                setTextColor(0xFF0F172A.toInt())
+                textSize = 14f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+
+            val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(file.lastModified()))
+            val sizeKb = file.length() / 1024
+            val subTv = TextView(this).apply {
+                text = "$dateStr • ${sizeKb} KB"
+                setTextColor(0xFF64748B.toInt())
+                textSize = 11f
+            }
+
+            infoCol.addView(titleTv)
+            infoCol.addView(subTv)
+
+            val shareBtn = MaterialButton(this).apply {
+                text = if (isHindi) "शेयर" else "Share"
+                textSize = 11f
+                setBackgroundColor(0xFFEFF6FF.toInt())
+                setTextColor(0xFF2563EB.toInt())
+                cornerRadius = (16f * resources.displayMetrics.density).toInt()
+                setOnClickListener { sharePdfFile(file) }
+            }
+
+            row.addView(infoCol)
+            row.addView(shareBtn)
+            card.addView(row)
+            card.setOnClickListener { openPdfFile(file) }
+
+            recentDocsContainer.addView(card)
+        }
+    }
+
+    private fun openPdfFile(file: File) {
+        try {
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/pdf")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(shareIntent, "Share or Save Clear PDF"))
+            startActivity(Intent.createChooser(intent, "Open PDF"))
         } catch (e: Exception) {
-            showToast("Error saving PDF: ${e.localizedMessage}")
+            Toast.makeText(this, "No PDF viewer installed", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun updateLanguageUI() {
-        if (isHindi) {
-            binding.tvAppSubtitle.text = "100% ऑफलाइन • बिना वॉटरमार्क"
-            binding.tvHeroTitle.text = "स्मार्ट क्लियर कैमरा स्कैनर"
-            binding.tvHeroDesc.text = "ऑटो-क्रॉप + मैजिक क्लियर फिल्टर से साफ PDF बनाएं"
-            binding.tvTool1.text = "फोटो और इमेज\nकंप्रेस (KB)"
-            binding.tvTool2.text = "सरकारी फॉर्म फोटो\nऔर नाम/तारीख"
-            binding.tvTool3.text = "फोटो से PDF\nबनाएं"
-            binding.tvTool4.text = "ID कार्ड आगे-पीछे\nएक पेज पर"
-            binding.tvTool5.text = "PDF कंप्रेस,\nमर्ज और लॉक"
-            binding.tvTool6.text = "मेरा ID वॉल्ट\n(फिंगरप्रिंट लॉक)"
-        } else {
-            binding.tvAppSubtitle.text = "100% Offline • No Watermark"
-            binding.tvHeroTitle.text = "Smart Clear Cam Scanner"
-            binding.tvHeroDesc.text = "Auto-Crop + Magic Clear Filters to PDF/JPG"
-            binding.tvTool1.text = "Photo & Image\nCompress (KB)"
-            binding.tvTool2.text = "Exam Photo &\nName/Date"
-            binding.tvTool3.text = "Image to PDF\nMaker"
-            binding.tvTool4.text = "ID Card Front\n& Back Merger"
-            binding.tvTool5.text = "PDF Compress,\nMerge & Lock"
-            binding.tvTool6.text = "My ID Vault\n(Fingerprint)"
+    private fun sharePdfFile(file: File) {
+        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share PDF"))
+    }
+
+    private fun setupUtilityCards() {
+        val msg = "Coming in next module update!"
+        findViewById<MaterialCardView>(R.id.cardPhotoCompress).setOnClickListener {
+            Toast.makeText(this, "Photo & KB Compressor: $msg", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<MaterialCardView>(R.id.cardExamPhoto).setOnClickListener {
+            Toast.makeText(this, "Exam Name/Date Maker: $msg", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<MaterialCardView>(R.id.cardImgToPdf).setOnClickListener {
+            Toast.makeText(this, "Image to PDF: $msg", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<MaterialCardView>(R.id.cardIdMerger).setOnClickListener {
+            Toast.makeText(this, "ID Card Merger: $msg", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<MaterialCardView>(R.id.cardPdfTools).setOnClickListener {
+            Toast.makeText(this, "PDF Merge & Lock: $msg", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<MaterialCardView>(R.id.cardIdVault).setOnClickListener {
+            Toast.makeText(this, "Fingerprint ID Vault: $msg", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun showToast(msg: String) {
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    private fun updateLanguage() {
+        findViewById<TextView>(R.id.tvAppSubtitle).text =
+            if (isHindi) "स्मार्ट ऑफलाइन डॉक्यूमेंट स्टूडियो" else "Smart Offline Document Studio"
+        findViewById<TextView>(R.id.tvHeroTitle).text =
+            if (isHindi) "स्मार्ट क्लियर कैम स्कैनर" else "Smart Clear Cam Scanner"
+        findViewById<TextView>(R.id.tvHeroDesc).text =
+            if (isHindi) "ऑटो-क्रॉप • लाइव फिल्टर • तुरंत PDF/JPG" else "Auto-Crop • Live Filters • Instant PDF/JPG"
+        findViewById<TextView>(R.id.tvTool1).text =
+            if (isHindi) "फोटो साइज कम\nकरें (KB)" else "Photo & Image\nCompress (KB)"
+        findViewById<TextView>(R.id.tvTool2).text =
+            if (isHindi) "एग्जाम फोटो व\nनाम/तारीख" else "Exam Photo &\nName / Date"
+        findViewById<TextView>(R.id.tvTool3).text =
+            if (isHindi) "फोटो से PDF\nबनाएं" else "Image to PDF\nMaker"
+        findViewById<TextView>(R.id.tvTool4).text =
+            if (isHindi) "आधार/ID दोनों\nसाइड एक पेज पर" else "ID Card Front\n& Back Merger"
+        findViewById<TextView>(R.id.tvTool5).text =
+            if (isHindi) "PDF कंप्रेस,\nमर्ज व लॉक" else "PDF Compress,\nMerge & Lock"
+        findViewById<TextView>(R.id.tvTool6).text =
+            if (isHindi) "मेरा ID वॉल्ट\n(फिंगरप्रिंट)" else "My ID Vault\n(Fingerprint)"
+        loadSavedDocuments()
     }
 }
