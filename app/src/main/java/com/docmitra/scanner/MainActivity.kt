@@ -193,10 +193,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupUtilityCards() {
         findViewById<MaterialCardView>(R.id.cardPhotoCompress).setOnClickListener {
-            startActivity(Intent(this, PhotoStudioActivity::class.java))
+            startActivity(Intent(this, PhotoStudioActivity::class.java).apply {
+                putExtra("MODE", "COMPRESS")
+            })
         }
         findViewById<MaterialCardView>(R.id.cardExamPhoto).setOnClickListener {
-            startActivity(Intent(this, PhotoStudioActivity::class.java))
+            startActivity(Intent(this, PhotoStudioActivity::class.java).apply {
+                putExtra("MODE", "EXAM")
+            })
         }
         findViewById<MaterialCardView>(R.id.cardImgToPdf).setOnClickListener {
             startActivity(Intent(this, PdfIdStudioActivity::class.java))
