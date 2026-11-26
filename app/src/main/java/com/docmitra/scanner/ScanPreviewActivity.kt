@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
@@ -14,9 +15,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
-import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -32,32 +32,33 @@ import java.util.Locale
 class ScanPreviewActivity : AppCompatActivity() {
 
     private lateinit var ivPreview: ImageView
-    private lateinit var etFileName: EditText
-    private var originalBitmaps = mutableListOf<Bitmap>()
-    private var filteredBitmaps = mutableListOf<Bitmap>()
-    private var currentFilter = 1 // Default: HD Magic Clear
+    private lateinit var tvPageIndicator: TextView
+    private lateinit var seekBrightness: SeekBar
+    private lateinit var seekContrast: SeekBar
+
+    private val originalBitmaps = ArrayList<Bitmap>()
+    private val editedBitmaps = ArrayList<Bitmap>()
+    private var currentIndex = 0
+    private var currentFilterMode = 1 // 0=Original, 1=Magic Crisp HD, 2=Super Sharp Text, 3=B&W Xerox
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scan_preview)
 
         ivPreview = findViewById(R.id.ivPreview)
-        etFileName = findViewById(R.id.etFileName)
-        val tvPageCount = findViewById<TextView>(R.id.tvPageCount)
-
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        etFileName.setText("DocMitra_$timeStamp")
+        tvPageIndicator = findViewById(R.id.tvPageIndicator)
+        seekBrightness = findViewById(R.id.seekBrightness)
+        seekContrast = findViewById(R.id.seekContrast)
 
         val uriStrings = intent.getStringArrayListExtra("SCAN_URIS") ?: arrayListOf()
         for (uriStr in uriStrings) {
             try {
-                val uri = Uri.parse(uriStr)
-                contentResolver.openInputStream(uri)?.use { stream ->
-                    val opts = BitmapFactory.Options().apply {
-                        inPreferredConfig = Bitmap.Config.ARGB_8888
-                    }
-                    BitmapFactory.decodeStream(stream, null, opts)?.let { bmp ->
+                contentResolver.openInputStream(Uri.parse(uriStr))?.use { stream ->
+                    val bmp = BitmapFactory.decodeStream(stream)
+                    if (bmp != null) {
                         originalBitmaps.add(bmp)
+                        // Default: Auto Magic Crisp HD applied immediately so blurry words become sharp
+                        editedBitmaps.add(applyMagicCrispEngine(bmp, 1.25f, 12f, 1))
                     }
                 }
             } catch (e: Exception) {
@@ -66,223 +67,249 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         if (originalBitmaps.isEmpty()) {
-            Toast.makeText(this, "No image captured", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No scanned pages found", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
 
-        tvPageCount.text = "${originalBitmaps.size} Page${if (originalBitmaps.size > 1) "s" else ""}"
+        seekBrightness.progress = 62
+        seekContrast.progress = 62
+        updatePageDisplay()
 
-        // Automatically apply HD Clear & Bright enhancement on capture
-        applyFilterToAll(1)
-
-        findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
-
-        val btnOrig = findViewById<MaterialButton>(R.id.btnFilterOriginal)
-        val btnMagic = findViewById<MaterialButton>(R.id.btnFilterMagic)
-        val btnBw = findViewById<MaterialButton>(R.id.btnFilterBW)
-        val btnSharp = findViewById<MaterialButton>(R.id.btnFilterSharp)
-        val btnLight = findViewById<MaterialButton>(R.id.btnFilterLight)
-
-        btnOrig.text = "Original"
-        btnMagic.text = "HD Clear"
-        btnBw.text = "Docs B&W"
-        btnSharp.text = "Ultra Sharp"
-        btnLight.text = "Super Bright"
-
-        btnOrig.setOnClickListener { applyFilterToAll(0) }
-        btnMagic.setOnClickListener { applyFilterToAll(1) }
-        btnBw.setOnClickListener { applyFilterToAll(2) }
-        btnSharp.setOnClickListener { applyFilterToAll(3) }
-        btnLight.setOnClickListener { applyFilterToAll(4) }
-
-        val btnSaveJpg = findViewById<MaterialButton>(R.id.btnSaveJpg)
-        val btnSavePdf = findViewById<MaterialButton>(R.id.btnSavePdf)
-
-        btnSaveJpg.text = "Save Photo in App"
-        btnSavePdf.text = "Save PDF in App"
-
-        btnSaveJpg.setOnClickListener { saveJpgInAppFirst() }
-        btnSavePdf.setOnClickListener { savePdfInAppFirst() }
-    }
-
-    private fun applyFilterToAll(filterType: Int) {
-        currentFilter = filterType
-        filteredBitmaps.clear()
-        for (bmp in originalBitmaps) {
-            filteredBitmaps.add(enhanceDocumentHd(bmp, filterType))
-        }
-        ivPreview.setImageBitmap(filteredBitmaps[0])
-        highlightActiveFilter(filterType)
-    }
-
-    private fun highlightActiveFilter(active: Int) {
-        val buttons = listOf(
-            findViewById<MaterialButton>(R.id.btnFilterOriginal),
-            findViewById<MaterialButton>(R.id.btnFilterMagic),
-            findViewById<MaterialButton>(R.id.btnFilterBW),
-            findViewById<MaterialButton>(R.id.btnFilterSharp),
-            findViewById<MaterialButton>(R.id.btnFilterLight)
-        )
-        buttons.forEachIndexed { index, btn ->
-            if (index == active) {
-                btn.setBackgroundColor(0xFF2563EB.toInt())
-                btn.setTextColor(0xFFFFFFFF.toInt())
-            } else {
-                btn.setBackgroundColor(0xFF334155.toInt())
-                btn.setTextColor(0xFFCBD5E1.toInt())
+        findViewById<MaterialButton>(R.id.btnPrevPage).setOnClickListener {
+            if (currentIndex > 0) {
+                currentIndex--
+                updatePageDisplay()
             }
         }
+
+        findViewById<MaterialButton>(R.id.btnNextPage).setOnClickListener {
+            if (currentIndex < editedBitmaps.size - 1) {
+                currentIndex++
+                updatePageDisplay()
+            }
+        }
+
+        findViewById<MaterialButton>(R.id.btnFilterOriginal).setOnClickListener {
+            currentFilterMode = 0
+            seekBrightness.progress = 50
+            seekContrast.progress = 50
+            applyCurrentAdjustments()
+            Toast.makeText(this, "Original Mode", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<MaterialButton>(R.id.btnFilterMagic).setOnClickListener {
+            currentFilterMode = 1
+            seekBrightness.progress = 64
+            seekContrast.progress = 68
+            applyCurrentAdjustments()
+            Toast.makeText(this, "Magic Crisp HD (Clear Words)", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<MaterialButton>(R.id.btnFilterGray).setOnClickListener {
+            currentFilterMode = 2
+            seekBrightness.progress = 60
+            seekContrast.progress = 72
+            applyCurrentAdjustments()
+            Toast.makeText(this, "Super Sharp Text Mode", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<MaterialButton>(R.id.btnFilterBw).setOnClickListener {
+            currentFilterMode = 3
+            seekBrightness.progress = 65
+            seekContrast.progress = 85
+            applyCurrentAdjustments()
+            Toast.makeText(this, "B&W Clear Print Mode", Toast.LENGTH_SHORT).show()
+        }
+
+        val sliderListener = object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) applyCurrentAdjustments()
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        }
+        seekBrightness.setOnSeekBarChangeListener(sliderListener)
+        seekContrast.setOnSeekBarChangeListener(sliderListener)
+
+        findViewById<MaterialButton>(R.id.btnSaveInApp).setOnClickListener {
+            showSaveDialog(alsoSaveToGallery = false)
+        }
+
+        findViewById<MaterialButton>(R.id.btnSaveGallery).setOnClickListener {
+            saveAllImagesToGallery()
+        }
+
+        findViewById<MaterialButton>(R.id.btnSharePdf).setOnClickListener {
+            showSaveDialog(alsoSaveToGallery = false, shareImmediately = true)
+        }
     }
 
-    // HD Document Enhancement: Boosts paper whiteness, text sharpness & clarity
-    private fun enhanceDocumentHd(src: Bitmap, type: Int): Bitmap {
-        if (type == 0) return src
-        val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(result)
+    private fun updatePageDisplay() {
+        ivPreview.setImageBitmap(editedBitmaps[currentIndex])
+        tvPageIndicator.text = "Page ${currentIndex + 1} of ${editedBitmaps.size}"
+    }
+
+    private fun applyCurrentAdjustments() {
+        val brightness = (seekBrightness.progress - 50) * 2.2f
+        val contrast = 0.5f + (seekContrast.progress / 50f) * 0.9f
+        val base = originalBitmaps[currentIndex]
+        editedBitmaps[currentIndex] = applyMagicCrispEngine(base, contrast, brightness, currentFilterMode)
+        ivPreview.setImageBitmap(editedBitmaps[currentIndex])
+    }
+
+    /**
+     * High-Definition Document Clarity Engine:
+     * 1. Unsharp Masking (Edge Sharpening) to make blurry/faded text crisp.
+     * 2. Local Background Whitening & Ink Darkening.
+     */
+    private fun applyMagicCrispEngine(src: Bitmap, contrast: Float, brightness: Float, mode: Int): Bitmap {
+        if (mode == 0 && contrast in 0.98f..1.02f && brightness in -2f..2f) {
+            return src.copy(Bitmap.Config.ARGB_8888, true)
+        }
+
+        // Step 1: Apply Tone, Contrast & Brightness
+        val toned = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(toned)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        val cm = ColorMatrix()
 
-        when (type) {
-            1 -> { // HD Clear (Auto-Enhance): Bright white paper + crisp dark ink + rich color
-                val sat = ColorMatrix().apply { setSaturation(1.18f) }
-                val contrast = 1.42f
-                val brightness = 24f
-                val tone = ColorMatrix(floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                ))
-                cm.postConcat(sat)
-                cm.postConcat(tone)
-            }
-            2 -> { // Docs B&W: Pure white background + deep black text
-                val bw = ColorMatrix().apply { setSaturation(0f) }
-                val contrast = 1.75f
-                val brightness = 30f
-                val tone = ColorMatrix(floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                ))
-                cm.postConcat(bw)
-                cm.postConcat(tone)
-            }
-            3 -> { // Ultra Sharp: High definition text edge boost
-                val contrast = 1.60f
-                val brightness = 16f
-                cm.set(floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                ))
-            }
-            4 -> { // Super Bright: Removes dark shadows completely
-                val contrast = 1.25f
-                val brightness = 46f
-                cm.set(floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                ))
-            }
+        val cm = ColorMatrix()
+        when (mode) {
+            1 -> cm.setSaturation(1.18f) // Magic Color HD
+            2 -> cm.setSaturation(0.35f) // Super Sharp Text
+            3 -> cm.setSaturation(0f)    // B&W High Contrast
         }
 
+        val scale = contrast
+        val translate = (-.5f * scale + .5f) * 255f + brightness
+        val contrastMatrix = ColorMatrix(
+            floatArrayOf(
+                scale, 0f, 0f, 0f, translate,
+                0f, scale, 0f, 0f, translate,
+                0f, 0f, scale, 0f, translate,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        cm.postConcat(contrastMatrix)
         paint.colorFilter = ColorMatrixColorFilter(cm)
         canvas.drawBitmap(src, 0f, 0f, paint)
+
+        if (mode == 0) return toned
+
+        // Step 2: Fast Unsharp Masking (Sharpen Blurry Text Edges)
+        return sharpenTextPixels(toned, if (mode == 1) 0.65f else 0.95f, mode == 3)
+    }
+
+    private fun sharpenTextPixels(bitmap: Bitmap, strength: Float, hardBw: Boolean): Bitmap {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        val outPixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        for (y in 1 until h - 1) {
+            val rowOffset = y * w
+            for (x in 1 until w - 1) {
+                val idx = rowOffset + x
+                val c = pixels[idx]
+                val top = pixels[idx - w]
+                val bottom = pixels[idx + w]
+                val left = pixels[idx - 1]
+                val right = pixels[idx + 1]
+
+                val rC = (c shr 16) and 0xFF
+                val gC = (c shr 8) and 0xFF
+                val bC = c and 0xFF
+
+                val rAvg = (((top shr 16) and 0xFF) + ((bottom shr 16) and 0xFF) + ((left shr 16) and 0xFF) + ((right shr 16) and 0xFF)) shr 2
+                val gAvg = (((top shr 8) and 0xFF) + ((bottom shr 8) and 0xFF) + ((left shr 8) and 0xFF) + ((right shr 8) and 0xFF)) shr 2
+                val bAvg = ((top and 0xFF) + (bottom and 0xFF) + (left and 0xFF) + (right and 0xFF)) shr 2
+
+                var rNew = (rC + ((rC - rAvg) * strength)).toInt().coerceIn(0, 255)
+                var gNew = (gC + ((gC - gAvg) * strength)).toInt().coerceIn(0, 255)
+                var bNew = (bC + ((bC - bAvg) * strength)).toInt().coerceIn(0, 255)
+
+                if (hardBw) {
+                    val lum = (rNew * 77 + gNew * 150 + bNew * 29) shr 8
+                    val bwVal = when {
+                        lum < 128 -> (lum * 0.45f).toInt() // Deepen ink
+                        lum > 185 -> 255                     // Pure white paper
+                        else -> lum
+                    }
+                    rNew = bwVal
+                    gNew = bwVal
+                    bNew = bwVal
+                } else {
+                    // Clean paper background without washing out light ink
+                    if (rNew > 210 && gNew > 210 && bNew > 210) {
+                        rNew = 255
+                        gNew = 255
+                        bNew = 255
+                    }
+                }
+
+                outPixels[idx] = (0xFF shl 24) or (rNew shl 16) or (gNew shl 8) or bNew
+            }
+        }
+
+        // Copy border pixels unchanged
+        for (x in 0 until w) {
+            outPixels[x] = pixels[x]
+            outPixels[(h - 1) * w + x] = pixels[(h - 1) * w + x]
+        }
+        for (y in 0 until h) {
+            outPixels[y * w] = pixels[y * w]
+            outPixels[y * w + (w - 1)] = pixels[y * w + (w - 1)]
+        }
+
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(outPixels, 0, w, 0, 0, w, h)
         return result
     }
 
-    private fun getCleanName(): String {
-        val raw = etFileName.text.toString().trim().replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        return if (raw.isEmpty()) "DocMitra_${System.currentTimeMillis()}" else raw
-    }
-
-    private fun getAppStorageDir(): File {
-        val dir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
-        if (!dir.exists()) dir.mkdirs()
-        return dir
-    }
-
-    // Step 1: Save HD Photo inside App first, then offer Gallery export
-    private fun saveJpgInAppFirst() {
-        val baseName = getCleanName()
-        val appDir = getAppStorageDir()
-        val savedFiles = mutableListOf<File>()
-        try {
-            filteredBitmaps.forEachIndexed { idx, bmp ->
-                val fileName = if (filteredBitmaps.size == 1) "$baseName.jpg" else "${baseName}_p${idx + 1}.jpg"
-                val file = File(appDir, fileName)
-                FileOutputStream(file).use { out ->
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 96, out)
-                }
-                savedFiles.add(file)
-            }
-            showSavedOptionsDialog(savedFiles, isPdf = false)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // Step 1: Save HD PDF inside App first, then offer Gallery/Downloads export
-    private fun savePdfInAppFirst() {
-        val fileName = "${getCleanName()}.pdf"
-        val appDir = getAppStorageDir()
-        val pdfFile = File(appDir, fileName)
-        val pdfDocument = PdfDocument()
-        try {
-            filteredBitmaps.forEachIndexed { idx, bmp ->
-                val pageInfo = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, idx + 1).create()
-                val page = pdfDocument.startPage(pageInfo)
-                page.canvas.drawBitmap(bmp, 0f, 0f, null)
-                pdfDocument.finishPage(page)
-            }
-            FileOutputStream(pdfFile).use { out -> pdfDocument.writeTo(out) }
-            pdfDocument.close()
-            showSavedOptionsDialog(listOf(pdfFile), isPdf = true)
-        } catch (e: Exception) {
-            pdfDocument.close()
-            Toast.makeText(this, "PDF Error: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // Step 2: After saving in App, give user option to Save to Gallery & Share
-    private fun showSavedOptionsDialog(files: List<File>, isPdf: Boolean) {
-        val primaryFile = files.first()
-        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", primaryFile)
-
+    private fun showSaveDialog(alsoSaveToGallery: Boolean, shareImmediately: Boolean = false) {
+        val options = arrayOf("Save as HD PDF (All Pages)", "Save as HD JPG Images")
         AlertDialog.Builder(this)
-            .setTitle("Saved in DocMitra App ✓")
-            .setMessage("यह डॉक्यूमेंट ऐप में सुरक्षित सेव हो गया है। क्या आप इसे फोन की Gallery / Downloads में भी सेव करना चाहते हैं?")
-            .setPositiveButton("Save to Gallery") { _, _ ->
-                exportToPhoneGallery()
-                finish()
-            }
-            .setNeutralButton("Share") { _, _ ->
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = if (isPdf) "application/pdf" else "image/jpeg"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .setTitle("Choose Format")
+            .setItems(options) { _, which ->
+                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val appDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
+                if (!appDir.exists()) appDir.mkdirs()
+
+                if (which == 0) {
+                    val pdfFile = File(appDir, "DocMitra_$timeStamp.pdf")
+                    createPdfFromBitmaps(editedBitmaps, pdfFile)
+                    Toast.makeText(this, "PDF Saved in DocMitra App!", Toast.LENGTH_LONG).show()
+                    if (shareImmediately) shareFile(pdfFile, "application/pdf")
+                } else {
+                    var lastFile: File? = null
+                    for (i in editedBitmaps.indices) {
+                        val imgFile = File(appDir, "DocMitra_${timeStamp}_P${i + 1}.jpg")
+                        FileOutputStream(imgFile).use { out ->
+                            editedBitmaps[i].compress(Bitmap.CompressFormat.JPEG, 96, out)
+                        }
+                        lastFile = imgFile
+                    }
+                    Toast.makeText(this, "${editedBitmaps.size} HD Image(s) Saved in App!", Toast.LENGTH_LONG).show()
+                    if (shareImmediately && lastFile != null) shareFile(lastFile, "image/jpeg")
                 }
-                startActivity(Intent.createChooser(shareIntent, "Share Document"))
-                finish()
             }
-            .setNegativeButton("Done (Keep in App)") { _, _ ->
-                finish()
-            }
-            .setCancelable(false)
             .show()
     }
 
-    private fun exportToPhoneGallery() {
-        val baseName = getCleanName()
+    private fun saveAllImagesToGallery() {
         try {
-            filteredBitmaps.forEachIndexed { idx, bmp ->
-                val fileName = if (filteredBitmaps.size == 1) "$baseName.jpg" else "${baseName}_p${idx + 1}.jpg"
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val appDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
+            if (!appDir.exists()) appDir.mkdirs()
+
+            for (i in editedBitmaps.indices) {
+                val fileName = "DocMitra_${timeStamp}_P${i + 1}.jpg"
+                val bmp = editedBitmaps[i]
+
+                val appFile = File(appDir, fileName)
+                FileOutputStream(appFile).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val values = ContentValues().apply {
                         put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
@@ -292,14 +319,37 @@ class ScanPreviewActivity : AppCompatActivity() {
                     val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) } }
                 } else {
-                    val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
-                    if (!dir.exists()) dir.mkdirs()
-                    FileOutputStream(File(dir, fileName)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
+                    val picDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
+                    if (!picDir.exists()) picDir.mkdirs()
+                    FileOutputStream(File(picDir, fileName)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
                 }
             }
-            Toast.makeText(this, "Saved to Gallery (Pictures/DocMitra)!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Saved to Phone Gallery & App!", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "Gallery export error: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun createPdfFromBitmaps(bitmaps: List<Bitmap>, outputFile: File) {
+        val pdfDocument = PdfDocument()
+        for (i in bitmaps.indices) {
+            val bmp = bitmaps[i]
+            val pageInfo = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, i + 1).create()
+            val page = pdfDocument.startPage(pageInfo)
+            page.canvas.drawBitmap(bmp, 0f, 0f, null)
+            pdfDocument.finishPage(page)
+        }
+        FileOutputStream(outputFile).use { out -> pdfDocument.writeTo(out) }
+        pdfDocument.close()
+    }
+
+    private fun shareFile(file: File, mimeType: String) {
+        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share Document"))
     }
 }
