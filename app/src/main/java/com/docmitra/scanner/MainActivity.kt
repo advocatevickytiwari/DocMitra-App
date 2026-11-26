@@ -5,13 +5,20 @@ import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
+import android.view.View
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
@@ -33,7 +40,15 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private var isHindi = false
+    private var currentSearchQuery = ""
     private lateinit var recentDocsContainer: LinearLayout
+    private lateinit var tvAllDocsCount: TextView
+    private lateinit var viewDocsTab: LinearLayout
+    private lateinit var viewToolsTab: ScrollView
+    private lateinit var ivTabDocs: ImageView
+    private lateinit var tvTabDocs: TextView
+    private lateinit var ivTabTools: ImageView
+    private lateinit var tvTabTools: TextView
 
     private val scannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -59,26 +74,69 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         recentDocsContainer = findViewById(R.id.recentDocsContainer)
-        findViewById<TextView>(R.id.tvRecentHeading).text = "SAVED DOCUMENTS IN APP"
+        tvAllDocsCount = findViewById(R.id.tvAllDocsCount)
+        viewDocsTab = findViewById(R.id.viewDocsTab)
+        viewToolsTab = findViewById(R.id.viewToolsTab)
+        ivTabDocs = findViewById(R.id.ivTabDocs)
+        tvTabDocs = findViewById(R.id.tvTabDocs)
+        ivTabTools = findViewById(R.id.ivTabTools)
+        tvTabTools = findViewById(R.id.tvTabTools)
 
-        val btnLangToggle = findViewById<MaterialButton>(R.id.btnLangToggle)
-        val cardCamScan = findViewById<MaterialCardView>(R.id.cardCamScan)
-
-        btnLangToggle.setOnClickListener {
+        findViewById<MaterialButton>(R.id.btnLangToggle).setOnClickListener {
             isHindi = !isHindi
             updateLanguage()
         }
 
-        cardCamScan.setOnClickListener {
+        findViewById<MaterialButton>(R.id.btnAboutInfo).setOnClickListener {
+            startActivity(Intent(this, AboutActivity::class.java))
+        }
+
+        findViewById<MaterialCardView>(R.id.cardCamScan).setOnClickListener {
             startDocumentScanner()
         }
 
+        findViewById<LinearLayout>(R.id.navTabDocs).setOnClickListener {
+            switchTab(showDocs = true)
+        }
+
+        findViewById<LinearLayout>(R.id.navTabTools).setOnClickListener {
+            switchTab(showDocs = false)
+        }
+
+        findViewById<EditText>(R.id.etSearchDocs).addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                currentSearchQuery = s?.toString()?.trim() ?: ""
+                loadSavedDocuments()
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
         setupUtilityCards()
+        switchTab(showDocs = true)
     }
 
     override fun onResume() {
         super.onResume()
         loadSavedDocuments()
+    }
+
+    private fun switchTab(showDocs: Boolean) {
+        if (showDocs) {
+            viewDocsTab.visibility = View.VISIBLE
+            viewToolsTab.visibility = View.GONE
+            ivTabDocs.setColorFilter(0xFF14532D.toInt())
+            tvTabDocs.setTextColor(0xFF14532D.toInt())
+            ivTabTools.setColorFilter(0xFF64748B.toInt())
+            tvTabTools.setTextColor(0xFF64748B.toInt())
+        } else {
+            viewDocsTab.visibility = View.GONE
+            viewToolsTab.visibility = View.VISIBLE
+            ivTabDocs.setColorFilter(0xFF64748B.toInt())
+            tvTabDocs.setTextColor(0xFF64748B.toInt())
+            ivTabTools.setColorFilter(0xFF14532D.toInt())
+            tvTabTools.setTextColor(0xFF14532D.toInt())
+        }
     }
 
     private fun startDocumentScanner() {
@@ -102,70 +160,105 @@ class MainActivity : AppCompatActivity() {
     private fun loadSavedDocuments() {
         recentDocsContainer.removeAllViews()
         val dir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
-        val files = dir.listFiles { file ->
+        val allFiles = dir.listFiles { file ->
             file.extension.equals("pdf", ignoreCase = true) || file.extension.equals("jpg", ignoreCase = true)
-        }?.sortedByDescending { it.lastModified() }
+        }?.sortedByDescending { it.lastModified() } ?: emptyList()
 
-        if (files.isNullOrEmpty()) {
+        val filteredFiles = if (currentSearchQuery.isEmpty()) {
+            allFiles
+        } else {
+            allFiles.filter { it.name.contains(currentSearchQuery, ignoreCase = true) }
+        }
+
+        tvAllDocsCount.text = if (isHindi) "सभी फाइलें (${filteredFiles.size})" else "All docs (${filteredFiles.size})"
+
+        if (filteredFiles.isEmpty()) {
             val emptyTv = TextView(this).apply {
-                text = if (isHindi) "अभी ऐप में कोई डॉक्यूमेंट सेव नहीं है। ऊपर SCAN दबाकर शुरू करें।" else "No saved documents yet. Tap SCAN above to create & save your first document."
-                setTextColor(0xFF94A3B8.toInt())
-                textSize = 13f
-                setPadding(8, 12, 8, 12)
+                text = if (currentSearchQuery.isNotEmpty()) {
+                    "No matching document found."
+                } else if (isHindi) {
+                    "अभी कोई डॉक्यूमेंट सेव नहीं है। नीचे बीच में दिए कैमरा बटन से स्कैन शुरू करें।"
+                } else {
+                    "No saved documents yet. Tap the center Camera button below to scan your first document."
+                }
+                setTextColor(0xFF64748B.toInt())
+                textSize = 14f
+                gravity = Gravity.CENTER
+                setPadding(24, 60, 24, 24)
             }
             recentDocsContainer.addView(emptyTv)
             return
         }
 
-        for (file in files) {
+        val density = resources.displayMetrics.density
+        for (file in filteredFiles) {
             val isPdf = file.extension.equals("pdf", ignoreCase = true)
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { bottomMargin = 10 }
-                radius = 12f * resources.displayMetrics.density
-                cardElevation = 1f * resources.displayMetrics.density
+                ).apply { bottomMargin = (10 * density).toInt() }
+                radius = 12f * density
+                cardElevation = 1f * density
                 setCardBackgroundColor(0xFFFFFFFF.toInt())
                 strokeColor = 0xFFE2E8F0.toInt()
-                strokeWidth = (1f * resources.displayMetrics.density).toInt()
+                strokeWidth = (1f * density).toInt()
             }
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(30, 26, 30, 26)
+                setPadding((12 * density).toInt(), (10 * density).toInt(), (10 * density).toInt(), (10 * density).toInt())
             }
 
-            val badgeTv = TextView(this).apply {
-                text = if (isPdf) "PDF" else "JPG"
-                setTextColor(if (isPdf) 0xFFDC2626.toInt() else 0xFF059669.toInt())
-                setBackgroundColor(if (isPdf) 0xFFFEE2E2.toInt() else 0xFFD1FAE5.toInt())
-                textSize = 11f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(18, 10, 18, 10)
+            val thumbCard = MaterialCardView(this).apply {
+                layoutParams = LinearLayout.LayoutParams((54 * density).toInt(), (66 * density).toInt())
+                radius = 8f * density
+                cardElevation = 0f
+                setCardBackgroundColor(0xFFF1F5F9.toInt())
+                strokeColor = 0xFFCBD5E1.toInt()
+                strokeWidth = (1f * density).toInt()
             }
+
+            val thumbIv = ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+                scaleType = ImageView.ScaleType.CENTER_CROP
+            }
+            val thumbBmp = generateFileThumbnail(file, isPdf)
+            if (thumbBmp != null) {
+                thumbIv.setImageBitmap(thumbBmp)
+            } else {
+                thumbIv.setImageResource(android.R.drawable.ic_menu_report_image)
+            }
+            thumbCard.addView(thumbIv)
 
             val infoCol = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = 24
+                    marginStart = (12 * density).toInt()
                 }
             }
 
             val titleTv = TextView(this).apply {
-                text = file.name
+                text = file.nameWithoutExtension
                 setTextColor(0xFF0F172A.toInt())
-                textSize = 14f
+                textSize = 15f
+                maxLines = 1
                 setTypeface(null, android.graphics.Typeface.BOLD)
             }
 
-            val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(file.lastModified()))
+            val dateStr = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
             val sizeKb = (file.length() / 1024).coerceAtLeast(1)
+            val badgeText = if (isPdf) "PDF • ${getPdfPageCount(file)}p" else "JPG"
+
             val subTv = TextView(this).apply {
-                text = "$dateStr • ${sizeKb} KB"
+                text = "$dateStr  |  $badgeText  |  ${sizeKb} KB"
                 setTextColor(0xFF64748B.toInt())
-                textSize = 11f
+                textSize = 12f
+                setPadding(0, (4 * density).toInt(), 0, 0)
             }
 
             infoCol.addView(titleTv)
@@ -173,21 +266,58 @@ class MainActivity : AppCompatActivity() {
 
             val moreBtn = MaterialButton(this).apply {
                 text = "⋮"
-                textSize = 16f
+                textSize = 18f
                 minWidth = 0
-                setBackgroundColor(0xFFF1F5F9.toInt())
-                setTextColor(0xFF0F172A.toInt())
-                cornerRadius = (12f * resources.displayMetrics.density).toInt()
+                setBackgroundColor(0x00000000)
+                setTextColor(0xFF475569.toInt())
                 setOnClickListener { showDocumentOptions(file, isPdf) }
             }
 
-            row.addView(badgeTv)
+            row.addView(thumbCard)
             row.addView(infoCol)
             row.addView(moreBtn)
             card.addView(row)
             card.setOnClickListener { openDocument(file, isPdf) }
 
             recentDocsContainer.addView(card)
+        }
+    }
+
+    private fun generateFileThumbnail(file: File, isPdf: Boolean): Bitmap? {
+        return try {
+            if (!isPdf) {
+                val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                BitmapFactory.decodeFile(file.absolutePath, opts)
+            } else {
+                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = PdfRenderer(pfd)
+                var bmp: Bitmap? = null
+                if (renderer.pageCount > 0) {
+                    val page = renderer.openPage(0)
+                    bmp = Bitmap.createBitmap(160, 200, Bitmap.Config.ARGB_8888)
+                    bmp.eraseColor(0xFFFFFFFF.toInt())
+                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+                }
+                renderer.close()
+                pfd.close()
+                bmp
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun getPdfPageCount(file: File): Int {
+        return try {
+            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val renderer = PdfRenderer(pfd)
+            val count = renderer.pageCount
+            renderer.close()
+            pfd.close()
+            count
+        } catch (e: Exception) {
+            1
         }
     }
 
@@ -200,7 +330,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(16, 16, 16, 16)
             }
             AlertDialog.Builder(this)
-                .setTitle(file.name)
+                .setTitle(file.nameWithoutExtension)
                 .setView(iv)
                 .setPositiveButton("Save to Gallery") { _, _ -> saveImageFileToGallery(file) }
                 .setNeutralButton("Share") { _, _ -> shareDocumentFile(file, false) }
@@ -223,25 +353,48 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDocumentOptions(file: File, isPdf: Boolean) {
         val options = if (isPdf) {
-            arrayOf("Open PDF", "Share PDF", "Delete from App")
+            arrayOf("Open PDF", "Rename File", "Share PDF", "Delete")
         } else {
-            arrayOf("View Photo", "Save to Gallery", "Share Photo", "Delete from App")
+            arrayOf("View Photo", "Rename File", "Save to Gallery", "Share Photo", "Delete")
         }
 
         AlertDialog.Builder(this)
-            .setTitle(file.name)
+            .setTitle(file.nameWithoutExtension)
             .setItems(options) { _, which ->
                 when (options[which]) {
                     "Open PDF", "View Photo" -> openDocument(file, isPdf)
+                    "Rename File" -> promptRenameFile(file)
                     "Save to Gallery" -> saveImageFileToGallery(file)
                     "Share PDF", "Share Photo" -> shareDocumentFile(file, isPdf)
-                    "Delete from App" -> {
+                    "Delete" -> {
                         file.delete()
                         Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
                         loadSavedDocuments()
                     }
                 }
             }
+            .show()
+    }
+
+    private fun promptRenameFile(file: File) {
+        val input = EditText(this).apply {
+            setText(file.nameWithoutExtension)
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Rename Document")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val newName = input.text.toString().trim().replace("[^a-zA-Z0-9_\\- ]".toRegex(), "_")
+                if (newName.isNotEmpty()) {
+                    val dest = File(file.parentFile, "$newName.${file.extension}")
+                    if (file.renameTo(dest)) {
+                        Toast.makeText(this, "Renamed!", Toast.LENGTH_SHORT).show()
+                        loadSavedDocuments()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -279,29 +432,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupUtilityCards() {
         findViewById<MaterialCardView>(R.id.cardPhotoCompress).setOnClickListener {
-            startActivity(Intent(this, PhotoStudioActivity::class.java).apply {
-                putExtra("MODE", "COMPRESS")
-            })
+            startActivity(Intent(this, PhotoStudioActivity::class.java).apply { putExtra("MODE", "COMPRESS") })
         }
         findViewById<MaterialCardView>(R.id.cardExamPhoto).setOnClickListener {
-            startActivity(Intent(this, PhotoStudioActivity::class.java).apply {
-                putExtra("MODE", "EXAM")
-            })
+            startActivity(Intent(this, PhotoStudioActivity::class.java).apply { putExtra("MODE", "EXAM") })
         }
         findViewById<MaterialCardView>(R.id.cardImgToPdf).setOnClickListener {
-            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply {
-                putExtra("MODE", "IMG_TO_PDF")
-            })
+            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply { putExtra("MODE", "IMG_TO_PDF") })
         }
         findViewById<MaterialCardView>(R.id.cardIdMerger).setOnClickListener {
-            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply {
-                putExtra("MODE", "ID_MERGE")
-            })
+            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply { putExtra("MODE", "ID_MERGE") })
         }
         findViewById<MaterialCardView>(R.id.cardPdfTools).setOnClickListener {
-            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply {
-                putExtra("MODE", "PDF_TOOLS")
-            })
+            startActivity(Intent(this, PdfIdStudioActivity::class.java).apply { putExtra("MODE", "PDF_TOOLS") })
         }
         findViewById<MaterialCardView>(R.id.cardIdVault).setOnClickListener {
             startActivity(Intent(this, VaultActivity::class.java))
@@ -309,12 +452,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateLanguage() {
-        findViewById<TextView>(R.id.tvAppSubtitle).text =
-            if (isHindi) "स्मार्ट ऑफलाइन डॉक्यूमेंट स्टूडियो" else "Smart Offline Document Studio"
-        findViewById<TextView>(R.id.tvHeroTitle).text =
-            if (isHindi) "स्मार्ट क्लियर कैम स्कैनर" else "Smart Clear Cam Scanner"
-        findViewById<TextView>(R.id.tvHeroDesc).text =
-            if (isHindi) "ऑटो-क्रॉप • HD फिल्टर • ऐप व गैलरी सेव" else "Auto-Crop • HD Filters • Save in App & Gallery"
+        tvTabDocs.text = if (isHindi) "फाइलें" else "Docs"
+        tvTabTools.text = if (isHindi) "टूल्स" else "Tools"
+        findViewById<TextView>(R.id.tvToolsHeading).text =
+            if (isHindi) "सभी डॉक्यूमेंट और PDF टूल्स" else "ALL DOCUMENT & PDF TOOLS"
         findViewById<TextView>(R.id.tvTool1).text =
             if (isHindi) "फोटो साइज कम\nकरें (KB)" else "Photo & Image\nCompress (KB)"
         findViewById<TextView>(R.id.tvTool2).text =
