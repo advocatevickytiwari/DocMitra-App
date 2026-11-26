@@ -9,12 +9,15 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.view.Gravity
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -41,9 +44,12 @@ class ScanPreviewActivity : AppCompatActivity() {
     private val editedBitmaps = ArrayList<Bitmap>()
     private var currentIndex = 0
     private var currentFilterMode = 1
+    private var appendTargetPath: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        appendTargetPath = intent.getStringExtra("APPEND_TARGET_PATH")
 
         val density = resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
@@ -193,7 +199,10 @@ class ScanPreviewActivity : AppCompatActivity() {
             }
         }
 
-        val btnSaveInApp = makeActionBtn("Save App", 0xFF14532D.toInt())
+        val btnSaveInApp = makeActionBtn(
+            if (appendTargetPath != null) "Add to File" else "Save App",
+            0xFF14532D.toInt()
+        )
         val btnSaveGallery = makeActionBtn("Gallery", 0xFFEA580C.toInt())
         val btnSharePdf = makeActionBtn("Share PDF", 0xFF1E293B.toInt())
 
@@ -285,7 +294,11 @@ class ScanPreviewActivity : AppCompatActivity() {
         seekContrast.setOnSeekBarChangeListener(sliderListener)
 
         btnSaveInApp.setOnClickListener {
-            showSaveDialog(shareImmediately = false)
+            if (appendTargetPath != null) {
+                appendPagesToExistingPdf(File(appendTargetPath!!), shareImmediately = false)
+            } else {
+                promptNameAndSave(shareImmediately = false)
+            }
         }
 
         btnSaveGallery.setOnClickListener {
@@ -293,7 +306,11 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         btnSharePdf.setOnClickListener {
-            showSaveDialog(shareImmediately = true)
+            if (appendTargetPath != null) {
+                appendPagesToExistingPdf(File(appendTargetPath!!), shareImmediately = true)
+            } else {
+                promptNameAndSave(shareImmediately = true)
+            }
         }
     }
 
@@ -410,34 +427,77 @@ class ScanPreviewActivity : AppCompatActivity() {
         return result
     }
 
-    private fun showSaveDialog(shareImmediately: Boolean = false) {
-        val options = arrayOf("Save as HD PDF (All Pages)", "Save as HD JPG Images")
+    private fun promptNameAndSave(shareImmediately: Boolean) {
+        val defaultName = "Doc_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
+        val input = EditText(this).apply {
+            setText(defaultName)
+            hint = "Enter person or file name (e.g. Pawan, Ram Singh)"
+            setSelection(text.length)
+        }
+
         AlertDialog.Builder(this)
-            .setTitle("Choose Format")
-            .setItems(options) { _, which ->
-                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            .setTitle("Save Document As")
+            .setView(input)
+            .setPositiveButton("Save (Can Add More Later)") { _, _ ->
+                val cleanName = input.text.toString().trim()
+                    .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "").trim()
+                    .ifEmpty { defaultName }
                 val appDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
                 if (!appDir.exists()) appDir.mkdirs()
 
-                if (which == 0) {
-                    val pdfFile = File(appDir, "DocMitra_$timeStamp.pdf")
-                    createPdfFromBitmaps(editedBitmaps, pdfFile)
-                    Toast.makeText(this, "PDF Saved in DocMitra App!", Toast.LENGTH_LONG).show()
-                    if (shareImmediately) shareFile(pdfFile, "application/pdf")
+                val pdfFile = File(appDir, "$cleanName.pdf")
+                createPdfFromBitmaps(editedBitmaps, pdfFile)
+                Toast.makeText(this, "Saved '$cleanName'! You can add more photos anytime.", Toast.LENGTH_LONG).show()
+                if (shareImmediately) {
+                    shareFile(pdfFile, "application/pdf")
                 } else {
-                    var lastFile: File? = null
-                    for (i in editedBitmaps.indices) {
-                        val imgFile = File(appDir, "DocMitra_${timeStamp}_P${i + 1}.jpg")
-                        FileOutputStream(imgFile).use { out ->
-                            editedBitmaps[i].compress(Bitmap.CompressFormat.JPEG, 96, out)
-                        }
-                        lastFile = imgFile
-                    }
-                    Toast.makeText(this, "${editedBitmaps.size} HD Image(s) Saved in App!", Toast.LENGTH_LONG).show()
-                    if (shareImmediately && lastFile != null) shareFile(lastFile, "image/jpeg")
+                    finish()
                 }
             }
+            .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun appendPagesToExistingPdf(targetPdfFile: File, shareImmediately: Boolean) {
+        try {
+            val combinedBitmaps = ArrayList<Bitmap>()
+
+            // 1. Load existing pages from targetPdfFile
+            if (targetPdfFile.exists()) {
+                val pfd = ParcelFileDescriptor.open(targetPdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = PdfRenderer(pfd)
+                for (i in 0 until renderer.pageCount) {
+                    val page = renderer.openPage(i)
+                    val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                    bmp.eraseColor(0xFFFFFFFF.toInt())
+                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+                    combinedBitmaps.add(bmp)
+                }
+                renderer.close()
+                pfd.close()
+            }
+
+            // 2. Append newly scanned pages
+            combinedBitmaps.addAll(editedBitmaps)
+
+            // 3. Rewrite updated multi-page PDF
+            createPdfFromBitmaps(combinedBitmaps, targetPdfFile)
+
+            Toast.makeText(
+                this,
+                "Added ${editedBitmaps.size} photo(s) to '${targetPdfFile.nameWithoutExtension}' (Total: ${combinedBitmaps.size} pages)!",
+                Toast.LENGTH_LONG
+            ).show()
+
+            if (shareImmediately) {
+                shareFile(targetPdfFile, "application/pdf")
+            } else {
+                finish()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error adding pages: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun saveAllImagesToGallery() {
