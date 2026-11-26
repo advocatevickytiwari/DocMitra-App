@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
@@ -168,7 +167,6 @@ class ScanPreviewActivity : AppCompatActivity() {
             return src.copy(Bitmap.Config.ARGB_8888, true)
         }
 
-        // Step 1: Apply Tone, Contrast & Brightness
         val toned = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(toned)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -196,7 +194,6 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         if (mode == 0) return toned
 
-        // Step 2: Fast Unsharp Masking (Sharpen Blurry Text Edges)
         return sharpenTextPixels(toned, if (mode == 1) 0.65f else 0.95f, mode == 3)
     }
 
@@ -232,15 +229,14 @@ class ScanPreviewActivity : AppCompatActivity() {
                 if (hardBw) {
                     val lum = (rNew * 77 + gNew * 150 + bNew * 29) shr 8
                     val bwVal = when {
-                        lum < 128 -> (lum * 0.45f).toInt() // Deepen ink
-                        lum > 185 -> 255                     // Pure white paper
+                        lum < 128 -> (lum * 0.45f).toInt()
+                        lum > 185 -> 255
                         else -> lum
                     }
                     rNew = bwVal
                     gNew = bwVal
                     bNew = bwVal
                 } else {
-                    // Clean paper background without washing out light ink
                     if (rNew > 210 && gNew > 210 && bNew > 210) {
                         rNew = 255
                         gNew = 255
@@ -252,7 +248,6 @@ class ScanPreviewActivity : AppCompatActivity() {
             }
         }
 
-        // Copy border pixels unchanged
         for (x in 0 until w) {
             outPixels[x] = pixels[x]
             outPixels[(h - 1) * w + x] = pixels[(h - 1) * w + x]
