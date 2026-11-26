@@ -3,190 +3,176 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F7F5"
+    android:background="#F8FAF8"
     android:fitsSystemWindows="true">
 
-    <!-- Clean White Enterprise Header with Two-Tone Brand Title -->
+    <!-- Top Branded Header -->
     <LinearLayout
-        android:id="@+id/headerLayout"
+        android:id="@+id/topHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="#FFFFFF"
-        android:orientation="vertical"
-        android:paddingHorizontal="20dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="20dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="18dp"
+        android:paddingVertical="12dp"
         app:layout_constraintTop_toTopOf="parent">
 
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            app:cardCornerRadius="10dp"
+            app:cardElevation="1dp">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:src="@drawable/ic_app_logo_3d" />
+        </com.google.android.material.card.MaterialCardView>
+
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
             android:orientation="horizontal">
 
-            <!-- Branded 3D App Logo -->
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="46dp"
-                android:layout_height="46dp"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="2dp">
-
-                <ImageView
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="centerCrop"
-                    android:src="@drawable/ic_app_logo_3d" />
-            </com.google.android.material.card.MaterialCardView>
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <!-- Two-Tone Brand Name: Doc (Vibrant Orange) + Mitra (Deep Forest Green) -->
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/tvBrandDoc"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Doc"
-                        android:textColor="#EA580C"
-                        android:textSize="24sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tvBrandMitra"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Mitra"
-                        android:textColor="#14532D"
-                        android:textSize="24sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/tvAppSubtitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SMART OFFLINE DOCUMENT STUDIO"
-                    android:textColor="#EA580C"
-                    android:textSize="10sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnLangToggle"
-                style="@style/Widget.Material3.Button.OutlinedButton"
+            <TextView
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:minWidth="0dp"
-                android:paddingHorizontal="12dp"
-                android:text="हिंदी / EN"
+                android:layout_height="wrap_content"
+                android:text="Doc"
+                android:textColor="#EA580C"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mitra"
                 android:textColor="#14532D"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                app:cornerRadius="18dp"
-                app:strokeColor="#14532D" />
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- Primary Action Card: Deep Forest Green + Vibrant Orange Accent -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardCamScan"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="#14532D"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="5dp">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLangToggle"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:layout_marginEnd="6dp"
+            android:minWidth="0dp"
+            android:paddingHorizontal="10dp"
+            android:text="हिंदी / EN"
+            android:textColor="#14532D"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            app:cornerRadius="17dp"
+            app:strokeColor="#CBD5E1" />
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="16dp">
-
-                <!-- Highlighted White Icon Box with 3D HD Camera Lens -->
-                <com.google.android.material.card.MaterialCardView
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    app:cardBackgroundColor="#FFFFFF"
-                    app:cardCornerRadius="14dp"
-                    app:cardElevation="2dp">
-
-                    <ImageView
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:layout_gravity="center"
-                        android:scaleType="fitCenter"
-                        android:src="@drawable/ic_cam_lens_3d" />
-                </com.google.android.material.card.MaterialCardView>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:id="@+id/tvHeroTitle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Smart Clear Cam Scanner"
-                        android:textColor="#FFFFFF"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tvHeroDesc"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="Auto-Crop • HD Filters • Save in App &amp; Gallery"
-                        android:textColor="#DCFCE7"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <!-- Vibrant Orange CTA Pill Button -->
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="#EA580C"
-                    android:paddingHorizontal="12dp"
-                    android:paddingVertical="7dp"
-                    android:text="SCAN ›"
-                    android:textColor="#FFFFFF"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnAboutInfo"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:insetLeft="0dp"
+            android:insetTop="0dp"
+            android:insetRight="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:padding="0dp"
+            android:text="ⓘ"
+            android:textColor="#14532D"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            app:cornerRadius="17dp"
+            app:strokeColor="#CBD5E1" />
     </LinearLayout>
 
-    <!-- Thin Divider -->
     <View
-        android:id="@+id/headerDivider"
+        android:id="@+id/topDivider"
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="#E2E8F0"
-        app:layout_constraintTop_toBottomOf="@id/headerLayout" />
+        app:layout_constraintTop_toBottomOf="@id/topHeader" />
 
-    <!-- Main Scrollable Content -->
+    <!-- SECTION 1: DOCS TAB VIEW -->
+    <LinearLayout
+        android:id="@+id/viewDocsTab"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:orientation="vertical"
+        app:layout_constraintBottom_toTopOf="@id/bottomBarDivider"
+        app:layout_constraintTop_toBottomOf="@id/topDivider">
+
+        <!-- Search & Count Bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#FFFFFF"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp">
+
+            <TextView
+                android:id="@+id/tvAllDocsCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="All docs (0)"
+                android:textColor="#0F172A"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/etSearchDocs"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:background="@android:drawable/editbox_background_normal"
+                android:drawableStart="@android:drawable/ic_menu_search"
+                android:drawablePadding="6dp"
+                android:hint="Search docs..."
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:paddingHorizontal="10dp"
+                android:singleLine="true"
+                android:textColor="#0F172A"
+                android:textColorHint="#94A3B8"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Saved Documents Scrollable List -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="36dp">
+
+            <LinearLayout
+                android:id="@+id/recentDocsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- SECTION 2: TOOLS TAB VIEW -->
     <ScrollView
+        android:id="@+id/viewToolsTab"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:clipToPadding="false"
-        android:padding="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/headerDivider">
+        android:paddingHorizontal="16dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="36dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/bottomBarDivider"
+        app:layout_constraintTop_toBottomOf="@id/topDivider">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -197,10 +183,10 @@
                 android:id="@+id/tvToolsHeading"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp"
-                android:text="DOCUMENT UTILITIES"
+                android:layout_marginBottom="12dp"
+                android:text="ALL DOCUMENT &amp; PDF TOOLS"
                 android:textColor="#14532D"
-                android:textSize="11sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <!-- Row 1 -->
@@ -212,7 +198,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardPhotoCompress"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -229,8 +215,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="42dp"
-                            android:layout_height="42dp"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_compress" />
 
@@ -238,7 +224,7 @@
                             android:id="@+id/tvTool1"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center"
                             android:text="Photo &amp; Image\nCompress (KB)"
                             android:textColor="#1E293B"
@@ -250,7 +236,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardExamPhoto"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -267,8 +253,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="42dp"
-                            android:layout_height="42dp"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_exam" />
 
@@ -276,7 +262,7 @@
                             android:id="@+id/tvTool2"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center"
                             android:text="Exam Photo &amp;\nName / Date"
                             android:textColor="#1E293B"
@@ -296,7 +282,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardImgToPdf"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -313,8 +299,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="42dp"
-                            android:layout_height="42dp"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_img_pdf" />
 
@@ -322,7 +308,7 @@
                             android:id="@+id/tvTool3"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center"
                             android:text="Image to PDF\nMaker"
                             android:textColor="#1E293B"
@@ -334,7 +320,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardIdMerger"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -351,8 +337,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="42dp"
-                            android:layout_height="42dp"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_id_merge" />
 
@@ -360,7 +346,7 @@
                             android:id="@+id/tvTool4"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center"
                             android:text="ID Card Front\n&amp; Back Merger"
                             android:textColor="#1E293B"
@@ -380,7 +366,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardPdfTools"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -397,8 +383,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="42dp"
-                            android:layout_height="42dp"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_pdf_tools" />
 
@@ -406,7 +392,7 @@
                             android:id="@+id/tvTool5"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center"
                             android:text="PDF Compress,\nMerge &amp; Lock"
                             android:textColor="#1E293B"
@@ -418,7 +404,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardIdVault"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -435,8 +421,8 @@
                         android:padding="10dp">
 
                         <ImageView
-                            android:layout_width="42dp"
-                            android:layout_height="42dp"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
                             android:scaleType="fitCenter"
                             android:src="@drawable/ic_tool_vault" />
 
@@ -444,7 +430,7 @@
                             android:id="@+id/tvTool6"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="8dp"
                             android:gravity="center"
                             android:text="My ID Vault\n(Fingerprint)"
                             android:textColor="#1E293B"
@@ -453,26 +439,121 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
-
-            <!-- Recent Saved Documents Section -->
-            <TextView
-                android:id="@+id/tvRecentHeading"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="20dp"
-                android:layout_marginBottom="10dp"
-                android:text="SAVED DOCUMENTS IN APP"
-                android:textColor="#14532D"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-
-            <LinearLayout
-                android:id="@+id/recentDocsContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical" />
-
         </LinearLayout>
     </ScrollView>
+
+    <!-- Bottom Navigation Bar Divider -->
+    <View
+        android:id="@+id/bottomBarDivider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E2E8F0"
+        app:layout_constraintBottom_toTopOf="@id/bottomNavBar" />
+
+    <!-- Bottom Navigation Bar: Docs | Space | Tools -->
+    <LinearLayout
+        android:id="@+id/bottomNavBar"
+        android:layout_width="match_parent"
+        android:layout_height="62dp"
+        android:background="#FFFFFF"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout
+            android:id="@+id/navTabDocs"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:id="@+id/ivTabDocs"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@android:drawable/ic_menu_agenda"
+                app:tint="#14532D" />
+
+            <TextView
+                android:id="@+id/tvTabDocs"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Docs"
+                android:textColor="#14532D"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Center Spacer for Floating Camera Button -->
+        <View
+            android:layout_width="86dp"
+            android:layout_height="match_parent" />
+
+        <LinearLayout
+            android:id="@+id/navTabTools"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:id="@+id/ivTabTools"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@android:drawable/ic_menu_manage"
+                app:tint="#64748B" />
+
+            <TextView
+                android:id="@+id/tvTabTools"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Tools"
+                android:textColor="#64748B"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Floating Circular Camera Button Centered Over Bottom Bar -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardCamScan"
+        android:layout_width="68dp"
+        android:layout_height="68dp"
+        android:layout_marginBottom="16dp"
+        android:clickable="true"
+        android:focusable="true"
+        app:cardBackgroundColor="#14532D"
+        app:cardCornerRadius="34dp"
+        app:cardElevation="8dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:strokeColor="#FFFFFF"
+        app:strokeWidth="3dp">
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:layout_gravity="center"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="23dp"
+            app:cardElevation="0dp">
+
+            <ImageView
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_cam_lens_3d" />
+        </com.google.android.material.card.MaterialCardView>
+    </com.google.android.material.card.MaterialCardView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
