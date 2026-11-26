@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.Bundle
@@ -41,6 +42,8 @@ class MainActivity : AppCompatActivity() {
 
     private var isHindi = false
     private var currentSearchQuery = ""
+    private var appendTargetFilePath: String? = null // Non-null when adding pages to an existing file
+
     private lateinit var recentDocsContainer: LinearLayout
     private lateinit var tvAllDocsCount: TextView
     private lateinit var viewDocsTab: LinearLayout
@@ -63,9 +66,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
                     putStringArrayListExtra("SCAN_URIS", uriList)
+                    putExtra("APPEND_TARGET_PATH", appendTargetFilePath)
                 }
+                appendTargetFilePath = null
                 startActivity(studioIntent)
+            } else {
+                appendTargetFilePath = null
             }
+        } else {
+            appendTargetFilePath = null
         }
     }
 
@@ -92,6 +101,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<MaterialCardView>(R.id.cardCamScan).setOnClickListener {
+            appendTargetFilePath = null
             startDocumentScanner()
         }
 
@@ -153,6 +163,7 @@ class MainActivity : AppCompatActivity() {
                 scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
             }
             .addOnFailureListener { e ->
+                appendTargetFilePath = null
                 Toast.makeText(this, "Scanner initializing, please try again: ${e.message}", Toast.LENGTH_LONG).show()
             }
     }
@@ -160,8 +171,10 @@ class MainActivity : AppCompatActivity() {
     private fun loadSavedDocuments() {
         recentDocsContainer.removeAllViews()
         val dir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
+        if (!dir.exists()) dir.mkdirs()
+
         val allFiles = dir.listFiles { file ->
-            file.extension.equals("pdf", ignoreCase = true) || file.extension.equals("jpg", ignoreCase = true)
+            file.isFile && (file.extension.equals("pdf", ignoreCase = true) || file.extension.equals("jpg", ignoreCase = true))
         }?.sortedByDescending { it.lastModified() } ?: emptyList()
 
         val filteredFiles = if (currentSearchQuery.isEmpty()) {
@@ -177,9 +190,9 @@ class MainActivity : AppCompatActivity() {
                 text = if (currentSearchQuery.isNotEmpty()) {
                     "No matching document found."
                 } else if (isHindi) {
-                    "अभी कोई डॉक्यूमेंट सेव नहीं है। नीचे बीच में दिए कैमरा बटन से स्कैन शुरू करें।"
+                    "अभी कोई डॉक्यूमेंट सेव नहीं है। नीचे कैमरा बटन से फोटो खींचें, उसे व्यक्ति के नाम से सेव करें और बाद में उसी में और फोटो जोड़ते जाएं।"
                 } else {
-                    "No saved documents yet. Tap the center Camera button below to scan your first document."
+                    "No saved documents yet. Tap the center Camera button below to scan, name it (e.g. Pawan), and keep adding more photos inside it anytime."
                 }
                 setTextColor(0xFF64748B.toInt())
                 textSize = 14f
@@ -252,11 +265,12 @@ class MainActivity : AppCompatActivity() {
 
             val dateStr = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
             val sizeKb = (file.length() / 1024).coerceAtLeast(1)
-            val badgeText = if (isPdf) "PDF • ${getPdfPageCount(file)}p" else "JPG"
+            val pageCount = if (isPdf) getPdfPageCount(file) else 1
+            val badgeText = "$pageCount ${if (pageCount == 1) "Page" else "Pages"}"
 
             val subTv = TextView(this).apply {
                 text = "$dateStr  |  $badgeText  |  ${sizeKb} KB"
-                setTextColor(0xFF64748B.toInt())
+                setTextColor(0xFF14532D.toInt())
                 textSize = 12f
                 setPadding(0, (4 * density).toInt(), 0, 0)
             }
@@ -323,6 +337,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openDocument(file: File, isPdf: Boolean) {
         if (!isPdf) {
+            // Convert single JPG into a multi-page PDF seamlessly if user wants to view or add more photos
             val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
             val iv = ImageView(this).apply {
                 setImageBitmap(bmp)
@@ -332,40 +347,119 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle(file.nameWithoutExtension)
                 .setView(iv)
-                .setPositiveButton("Save to Gallery") { _, _ -> saveImageFileToGallery(file) }
+                .setPositiveButton("+ Add More Photos") { _, _ ->
+                    val pdfTarget = convertJpgToPdfFile(file)
+                    if (pdfTarget != null) {
+                        appendTargetFilePath = pdfTarget.absolutePath
+                        startDocumentScanner()
+                    }
+                }
                 .setNeutralButton("Share") { _, _ -> shareDocumentFile(file, false) }
                 .setNegativeButton("Close", null)
                 .show()
             return
         }
 
+        // Render all pages inside an in-app multi-page viewer with "+ Add More Photos" button
         try {
-            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/pdf")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val density = resources.displayMetrics.density
+            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val renderer = PdfRenderer(pfd)
+            val totalPages = renderer.pageCount
+
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding((12 * density).toInt(), (8 * density).toInt(), (12 * density).toInt(), (12 * density).toInt())
             }
-            startActivity(Intent.createChooser(intent, "Open PDF"))
+
+            for (i in 0 until totalPages) {
+                val page = renderer.openPage(i)
+                val targetW = 720
+                val targetH = ((page.height.toFloat() / page.width.toFloat()) * targetW).toInt().coerceAtLeast(100)
+                val bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                bmp.eraseColor(0xFFFFFFFF.toInt())
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                page.close()
+
+                val pageLabel = TextView(this).apply {
+                    text = "Page ${i + 1} of $totalPages"
+                    textSize = 12f
+                    setTextColor(0xFF14532D.toInt())
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setPadding(0, (8 * density).toInt(), 0, (4 * density).toInt())
+                }
+
+                val iv = ImageView(this).apply {
+                    setImageBitmap(bmp)
+                    adjustViewBounds = true
+                    setBackgroundColor(0xFFE2E8F0.toInt())
+                    setPadding(2, 2, 2, 2)
+                }
+
+                container.addView(pageLabel)
+                container.addView(iv)
+            }
+
+            renderer.close()
+            pfd.close()
+
+            val scrollView = ScrollView(this).apply { addView(container) }
+
+            AlertDialog.Builder(this)
+                .setTitle("${file.nameWithoutExtension} ($totalPages Pages)")
+                .setView(scrollView)
+                .setPositiveButton("+ Add More Photos") { _, _ ->
+                    appendTargetFilePath = file.absolutePath
+                    startDocumentScanner()
+                }
+                .setNeutralButton("Share") { _, _ -> shareDocumentFile(file, true) }
+                .setNegativeButton("Close", null)
+                .show()
         } catch (e: Exception) {
-            Toast.makeText(this, "No PDF viewer installed", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Could not open file: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun convertJpgToPdfFile(jpgFile: File): File? {
+        return try {
+            val bmp = BitmapFactory.decodeFile(jpgFile.absolutePath) ?: return null
+            val pdfFile = File(jpgFile.parentFile, "${jpgFile.nameWithoutExtension}.pdf")
+            val pdfDoc = PdfDocument()
+            val pageInfo = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, 1).create()
+            val page = pdfDoc.startPage(pageInfo)
+            page.canvas.drawBitmap(bmp, 0f, 0f, null)
+            pdfDoc.finishPage(page)
+            FileOutputStream(pdfFile).use { out -> pdfDoc.writeTo(out) }
+            pdfDoc.close()
+            jpgFile.delete()
+            pdfFile
+        } catch (e: Exception) {
+            null
         }
     }
 
     private fun showDocumentOptions(file: File, isPdf: Boolean) {
         val options = if (isPdf) {
-            arrayOf("Open PDF", "Rename File", "Share PDF", "Delete")
+            arrayOf("+ Add More Photos", "Open & View All Pages", "Rename (e.g. Pawan / Ram Singh)", "Share File", "Delete")
         } else {
-            arrayOf("View Photo", "Rename File", "Save to Gallery", "Share Photo", "Delete")
+            arrayOf("+ Add More Photos", "View Photo", "Rename (e.g. Pawan / Ram Singh)", "Save to Gallery", "Share Photo", "Delete")
         }
 
         AlertDialog.Builder(this)
             .setTitle(file.nameWithoutExtension)
             .setItems(options) { _, which ->
                 when (options[which]) {
-                    "Open PDF", "View Photo" -> openDocument(file, isPdf)
-                    "Rename File" -> promptRenameFile(file)
+                    "+ Add More Photos" -> {
+                        val targetPdf = if (isPdf) file else convertJpgToPdfFile(file)
+                        if (targetPdf != null) {
+                            appendTargetFilePath = targetPdf.absolutePath
+                            startDocumentScanner()
+                        }
+                    }
+                    "Open & View All Pages", "View Photo" -> openDocument(file, isPdf)
+                    "Rename (e.g. Pawan / Ram Singh)" -> promptRenameFile(file)
                     "Save to Gallery" -> saveImageFileToGallery(file)
-                    "Share PDF", "Share Photo" -> shareDocumentFile(file, isPdf)
+                    "Share File", "Share Photo" -> shareDocumentFile(file, isPdf)
                     "Delete" -> {
                         file.delete()
                         Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
@@ -379,17 +473,19 @@ class MainActivity : AppCompatActivity() {
     private fun promptRenameFile(file: File) {
         val input = EditText(this).apply {
             setText(file.nameWithoutExtension)
+            hint = "Enter name (e.g. Pawan, Ram Singh)"
             setSelection(text.length)
         }
         AlertDialog.Builder(this)
-            .setTitle("Rename Document")
+            .setTitle("Rename File")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
-                val newName = input.text.toString().trim().replace("[^a-zA-Z0-9_\\- ]".toRegex(), "_")
+                val newName = input.text.toString().trim()
+                    .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "").trim()
                 if (newName.isNotEmpty()) {
                     val dest = File(file.parentFile, "$newName.${file.extension}")
                     if (file.renameTo(dest)) {
-                        Toast.makeText(this, "Renamed!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Saved as '$newName'", Toast.LENGTH_SHORT).show()
                         loadSavedDocuments()
                     }
                 }
