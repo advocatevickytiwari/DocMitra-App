@@ -522,7 +522,7 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Floating Circular Camera Button Centered Over Bottom Bar -->
+    <!-- Floating Circular Camera Button Matching "Doc" Orange (#EA580C) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardCamScan"
         android:layout_width="68dp"
@@ -530,7 +530,7 @@
         android:layout_marginBottom="16dp"
         android:clickable="true"
         android:focusable="true"
-        app:cardBackgroundColor="#14532D"
+        app:cardBackgroundColor="#EA580C"
         app:cardCornerRadius="34dp"
         app:cardElevation="8dp"
         app:layout_constraintBottom_toBottomOf="parent"
