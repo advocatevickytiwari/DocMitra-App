@@ -216,7 +216,30 @@ class ScanPreviewActivity : AppCompatActivity() {
         root.addView(controlsPanel)
         setContentView(root)
 
-        val uriStrings = intent.getStringArrayListExtra("SCAN_URIS") ?: arrayListOf()
+        val uriStrings = ArrayList<String>()
+        intent.getStringArrayListExtra("SCAN_URIS")?.let { uriStrings.addAll(it) }
+
+        // Handle images shared directly from WhatsApp / Gallery
+        if (uriStrings.isEmpty()) {
+            if (intent.action == Intent.ACTION_SEND) {
+                val singleUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+                singleUri?.let { uriStrings.add(it.toString()) }
+            } else if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+                val multiUris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+                }
+                multiUris?.forEach { uriStrings.add(it.toString()) }
+            }
+        }
+
         for (uriStr in uriStrings) {
             try {
                 contentResolver.openInputStream(Uri.parse(uriStr))?.use { stream ->
@@ -332,12 +355,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         ivPreview.setImageBitmap(editedBitmaps[currentIndex])
     }
 
-    /**
-     * Pro Document Clarity Engine:
-     * 1. Estimates local paper illumination (downscaled background map) to remove shadows & yellow tint.
-     * 2. Normalizes paper to pure white while preserving stamps/signatures & darkening text ink.
-     * 3. Applies multi-neighbor unsharp masking for razor-sharp characters.
-     */
     private fun processDocumentPro(src: Bitmap, whitenessProgress: Int, inkProgress: Int, mode: Int): Bitmap {
         if (mode == 0 && whitenessProgress in 48..52 && inkProgress in 48..52) {
             return src.copy(Bitmap.Config.ARGB_8888, true)
@@ -366,14 +383,12 @@ class ScanPreviewActivity : AppCompatActivity() {
         val w = src.width
         val h = src.height
 
-        // Step 1: Estimate local paper lighting by downscaling & upscaling smoothly (removes uneven shadows)
         val bgW = max(16, w / 24)
         val bgH = max(16, h / 24)
         val small = Bitmap.createScaledBitmap(src, bgW, bgH, true)
         val smallPixels = IntArray(bgW * bgH)
         small.getPixels(smallPixels, 0, bgW, 0, 0, bgW, bgH)
 
-        // Brighten dark ink spots inside background map so paper illumination dominates
         for (i in smallPixels.indices) {
             val c = smallPixels[i]
             val r = max(135, (c shr 16) and 0xFF)
@@ -405,12 +420,10 @@ class ScanPreviewActivity : AppCompatActivity() {
             val bg = max(120, (bc shr 8) and 0xFF)
             val bb = max(120, bc and 0xFF)
 
-            // Shadow-normalized color values
             var nr = ((sr * 255) / br).coerceIn(0, 255)
             var ng = ((sg * 255) / bg).coerceIn(0, 255)
             var nb = ((sb * 255) / bb).coerceIn(0, 255)
 
-            // Apply S-curve contrast around paper threshold to darken ink and whiten paper
             fun enhanceChannel(v: Int): Int {
                 if (v >= whiteCut) return 255
                 val ratio = v.toFloat() / whiteCut.toFloat()
@@ -424,7 +437,6 @@ class ScanPreviewActivity : AppCompatActivity() {
 
             when (mode) {
                 1 -> {
-                    // Magic HD Color: Keep blue stamps/signatures vivid while paper stays pure white
                     val maxC = max(nr, max(ng, nb))
                     val minC = min(nr, min(ng, nb))
                     if (maxC - minC > 22) {
@@ -435,7 +447,6 @@ class ScanPreviewActivity : AppCompatActivity() {
                     }
                 }
                 2 -> {
-                    // Doc Clear: High-definition grayscale-tinted text clarity
                     val lum = (nr * 77 + ng * 150 + nb * 29) shr 8
                     val crisp = when {
                         lum > 218 -> 255
@@ -447,7 +458,6 @@ class ScanPreviewActivity : AppCompatActivity() {
                     nb = crisp
                 }
                 3 -> {
-                    // B&W Xerox: Pure 2-tone photocopy output
                     val lum = (nr * 77 + ng * 150 + nb * 29) shr 8
                     val threshold = (175 + (whitenessProgress - 50) * 0.6f).toInt().coerceIn(130, 215)
                     val bw = if (lum < threshold) 0 else 255
@@ -460,7 +470,6 @@ class ScanPreviewActivity : AppCompatActivity() {
             normPixels[i] = (0xFF shl 24) or (nr shl 16) or (ng shl 8) or nb
         }
 
-        // Step 2: Crisp edge sharpening so small Hindi/English fonts look razor-sharp
         val outPixels = IntArray(w * h)
         val sharpStrength = when (mode) {
             1 -> 0.85f
