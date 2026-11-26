@@ -14,7 +14,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.Gravity
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -38,16 +40,170 @@ class ScanPreviewActivity : AppCompatActivity() {
     private val originalBitmaps = ArrayList<Bitmap>()
     private val editedBitmaps = ArrayList<Bitmap>()
     private var currentIndex = 0
-    private var currentFilterMode = 1 // 0=Original, 1=Magic Crisp HD, 2=Super Sharp Text, 3=B&W Xerox
+    private var currentFilterMode = 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_scan_preview)
 
-        ivPreview = findViewById(R.id.ivPreview)
-        tvPageIndicator = findViewById(R.id.tvPageIndicator)
-        seekBrightness = findViewById(R.id.seekBrightness)
-        seekContrast = findViewById(R.id.seekContrast)
+        val density = resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0F172A.toInt())
+        }
+
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF14532D.toInt())
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+
+        val btnBack = MaterialButton(this).apply {
+            text = "← Back"
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0x00000000)
+            setOnClickListener { finish() }
+        }
+
+        tvPageIndicator = TextView(this).apply {
+            text = "Page 1 of 1"
+            textSize = 15f
+            setTextColor(0xFFFFFFFF.toInt())
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val btnPrevPage = MaterialButton(this).apply {
+            text = "◀"
+            minWidth = dp(40)
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0x22FFFFFF)
+        }
+
+        val btnNextPage = MaterialButton(this).apply {
+            text = "▶"
+            minWidth = dp(40)
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0x22FFFFFF)
+        }
+
+        topBar.addView(btnBack)
+        topBar.addView(tvPageIndicator)
+        topBar.addView(btnPrevPage)
+        topBar.addView(btnNextPage)
+        root.addView(topBar)
+
+        ivPreview = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            ).apply {
+                setMargins(dp(12), dp(12), dp(12), dp(12))
+            }
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(0xFF1E293B.toInt())
+        }
+        root.addView(ivPreview)
+
+        val controlsPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+        }
+
+        val filterRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+
+        fun makeFilterBtn(label: String, bgColor: Int): MaterialButton {
+            return MaterialButton(this).apply {
+                text = label
+                textSize = 11f
+                setTextColor(0xFFFFFFFF.toInt())
+                setBackgroundColor(bgColor)
+                layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f).apply {
+                    marginEnd = dp(4)
+                }
+                setPadding(dp(4), 0, dp(4), 0)
+            }
+        }
+
+        val btnFilterOriginal = makeFilterBtn("Original", 0xFF64748B.toInt())
+        val btnFilterMagic = makeFilterBtn("Magic HD", 0xFFEA580C.toInt())
+        val btnFilterGray = makeFilterBtn("Sharp Text", 0xFF14532D.toInt())
+        val btnFilterBw = makeFilterBtn("B&W Print", 0xFF0F172A.toInt())
+
+        filterRow.addView(btnFilterOriginal)
+        filterRow.addView(btnFilterMagic)
+        filterRow.addView(btnFilterGray)
+        filterRow.addView(btnFilterBw)
+        controlsPanel.addView(filterRow)
+
+        fun makeSliderRow(title: String): Pair<LinearLayout, SeekBar> {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(6), 0, dp(2))
+            }
+            val tv = TextView(this).apply {
+                text = title
+                textSize = 12f
+                setTextColor(0xFF334155.toInt())
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(dp(76), LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            val sb = SeekBar(this).apply {
+                max = 100
+                progress = 62
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            row.addView(tv)
+            row.addView(sb)
+            return Pair(row, sb)
+        }
+
+        val (brightRow, sbBright) = makeSliderRow("Brightness")
+        val (contrastRow, sbContrast) = makeSliderRow("Sharpness")
+        seekBrightness = sbBright
+        seekContrast = sbContrast
+
+        controlsPanel.addView(brightRow)
+        controlsPanel.addView(contrastRow)
+
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+
+        fun makeActionBtn(label: String, bgColor: Int): MaterialButton {
+            return MaterialButton(this).apply {
+                text = label
+                textSize = 12f
+                setTextColor(0xFFFFFFFF.toInt())
+                setBackgroundColor(bgColor)
+                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                    marginEnd = dp(6)
+                }
+            }
+        }
+
+        val btnSaveInApp = makeActionBtn("Save App", 0xFF14532D.toInt())
+        val btnSaveGallery = makeActionBtn("Gallery", 0xFFEA580C.toInt())
+        val btnSharePdf = makeActionBtn("Share PDF", 0xFF1E293B.toInt())
+
+        actionRow.addView(btnSaveInApp)
+        actionRow.addView(btnSaveGallery)
+        actionRow.addView(btnSharePdf)
+        controlsPanel.addView(actionRow)
+
+        root.addView(controlsPanel)
+        setContentView(root)
 
         val uriStrings = intent.getStringArrayListExtra("SCAN_URIS") ?: arrayListOf()
         for (uriStr in uriStrings) {
@@ -56,7 +212,6 @@ class ScanPreviewActivity : AppCompatActivity() {
                     val bmp = BitmapFactory.decodeStream(stream)
                     if (bmp != null) {
                         originalBitmaps.add(bmp)
-                        // Default: Auto Magic Crisp HD applied immediately so blurry words become sharp
                         editedBitmaps.add(applyMagicCrispEngine(bmp, 1.25f, 12f, 1))
                     }
                 }
@@ -71,25 +226,23 @@ class ScanPreviewActivity : AppCompatActivity() {
             return
         }
 
-        seekBrightness.progress = 62
-        seekContrast.progress = 62
         updatePageDisplay()
 
-        findViewById<MaterialButton>(R.id.btnPrevPage).setOnClickListener {
+        btnPrevPage.setOnClickListener {
             if (currentIndex > 0) {
                 currentIndex--
                 updatePageDisplay()
             }
         }
 
-        findViewById<MaterialButton>(R.id.btnNextPage).setOnClickListener {
+        btnNextPage.setOnClickListener {
             if (currentIndex < editedBitmaps.size - 1) {
                 currentIndex++
                 updatePageDisplay()
             }
         }
 
-        findViewById<MaterialButton>(R.id.btnFilterOriginal).setOnClickListener {
+        btnFilterOriginal.setOnClickListener {
             currentFilterMode = 0
             seekBrightness.progress = 50
             seekContrast.progress = 50
@@ -97,7 +250,7 @@ class ScanPreviewActivity : AppCompatActivity() {
             Toast.makeText(this, "Original Mode", Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<MaterialButton>(R.id.btnFilterMagic).setOnClickListener {
+        btnFilterMagic.setOnClickListener {
             currentFilterMode = 1
             seekBrightness.progress = 64
             seekContrast.progress = 68
@@ -105,7 +258,7 @@ class ScanPreviewActivity : AppCompatActivity() {
             Toast.makeText(this, "Magic Crisp HD (Clear Words)", Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<MaterialButton>(R.id.btnFilterGray).setOnClickListener {
+        btnFilterGray.setOnClickListener {
             currentFilterMode = 2
             seekBrightness.progress = 60
             seekContrast.progress = 72
@@ -113,7 +266,7 @@ class ScanPreviewActivity : AppCompatActivity() {
             Toast.makeText(this, "Super Sharp Text Mode", Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<MaterialButton>(R.id.btnFilterBw).setOnClickListener {
+        btnFilterBw.setOnClickListener {
             currentFilterMode = 3
             seekBrightness.progress = 65
             seekContrast.progress = 85
@@ -131,16 +284,16 @@ class ScanPreviewActivity : AppCompatActivity() {
         seekBrightness.setOnSeekBarChangeListener(sliderListener)
         seekContrast.setOnSeekBarChangeListener(sliderListener)
 
-        findViewById<MaterialButton>(R.id.btnSaveInApp).setOnClickListener {
-            showSaveDialog(alsoSaveToGallery = false)
+        btnSaveInApp.setOnClickListener {
+            showSaveDialog(shareImmediately = false)
         }
 
-        findViewById<MaterialButton>(R.id.btnSaveGallery).setOnClickListener {
+        btnSaveGallery.setOnClickListener {
             saveAllImagesToGallery()
         }
 
-        findViewById<MaterialButton>(R.id.btnSharePdf).setOnClickListener {
-            showSaveDialog(alsoSaveToGallery = false, shareImmediately = true)
+        btnSharePdf.setOnClickListener {
+            showSaveDialog(shareImmediately = true)
         }
     }
 
@@ -157,11 +310,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         ivPreview.setImageBitmap(editedBitmaps[currentIndex])
     }
 
-    /**
-     * High-Definition Document Clarity Engine:
-     * 1. Unsharp Masking (Edge Sharpening) to make blurry/faded text crisp.
-     * 2. Local Background Whitening & Ink Darkening.
-     */
     private fun applyMagicCrispEngine(src: Bitmap, contrast: Float, brightness: Float, mode: Int): Bitmap {
         if (mode == 0 && contrast in 0.98f..1.02f && brightness in -2f..2f) {
             return src.copy(Bitmap.Config.ARGB_8888, true)
@@ -173,9 +321,9 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         val cm = ColorMatrix()
         when (mode) {
-            1 -> cm.setSaturation(1.18f) // Magic Color HD
-            2 -> cm.setSaturation(0.35f) // Super Sharp Text
-            3 -> cm.setSaturation(0f)    // B&W High Contrast
+            1 -> cm.setSaturation(1.18f)
+            2 -> cm.setSaturation(0.35f)
+            3 -> cm.setSaturation(0f)
         }
 
         val scale = contrast
@@ -262,7 +410,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         return result
     }
 
-    private fun showSaveDialog(alsoSaveToGallery: Boolean, shareImmediately: Boolean = false) {
+    private fun showSaveDialog(shareImmediately: Boolean = false) {
         val options = arrayOf("Save as HD PDF (All Pages)", "Save as HD JPG Images")
         AlertDialog.Builder(this)
             .setTitle("Choose Format")
