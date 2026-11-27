@@ -83,7 +83,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Shield: Hide sensitive document thumbnails in Recent Apps switcher & block spy screenshots
+        // Security Shield: FLAG_SECURE
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -136,6 +136,12 @@ class MainActivity : AppCompatActivity() {
         switchTab(showDocs = true)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        switchTab(showDocs = true)
+        loadSavedDocuments()
+    }
+
     override fun onResume() {
         super.onResume()
         loadSavedDocuments()
@@ -147,7 +153,6 @@ class MainActivity : AppCompatActivity() {
         return dir
     }
 
-    // Automatically move any older exposed files from External Storage into encrypted-sandbox filesDir
     private fun migrateLegacyExternalDocsToPrivateSandbox() {
         try {
             val legacyDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
@@ -200,7 +205,7 @@ class MainActivity : AppCompatActivity() {
             }
             .addOnFailureListener { e ->
                 appendTargetFilePath = null
-                Toast.makeText(this, "Scanner initializing, please try again: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Scanner ready nahi hai, dobara tap karein: ${e.message}", Toast.LENGTH_SHORT).show()
             }
     }
 
@@ -225,9 +230,9 @@ class MainActivity : AppCompatActivity() {
                 text = if (currentSearchQuery.isNotEmpty()) {
                     "No matching document found."
                 } else if (isHindi) {
-                    "अभी कोई डॉक्यूमेंट सेव नहीं है। नीचे कैमरा बटन से फोटो खींचें और उसे नाम देकर सुरक्षित सेव करें।"
+                    "नीचे ऑरेंज कैमरा बटन दबाएं → फोटो खींचें → ऊपर नाम लिखें और '✓ Done & Save' दबाएं।"
                 } else {
-                    "No saved documents yet. Tap the Camera button below to scan and save securely."
+                    "Tap the orange Camera button below to scan, name your file at the top, and tap '✓ Done & Save'."
                 }
                 setTextColor(0xFF64748B.toInt())
                 textSize = 14f
@@ -256,11 +261,11 @@ class MainActivity : AppCompatActivity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding((12 * density).toInt(), (10 * density).toInt(), (10 * density).toInt(), (10 * density).toInt())
+                setPadding((10 * density).toInt(), (10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt())
             }
 
             val thumbCard = MaterialCardView(this).apply {
-                layoutParams = LinearLayout.LayoutParams((54 * density).toInt(), (66 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams((52 * density).toInt(), (64 * density).toInt())
                 radius = 8f * density
                 cardElevation = 0f
                 setCardBackgroundColor(0xFFF1F5F9.toInt())
@@ -286,7 +291,7 @@ class MainActivity : AppCompatActivity() {
             val infoCol = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = (12 * density).toInt()
+                    marginStart = (10 * density).toInt()
                 }
             }
 
@@ -304,19 +309,31 @@ class MainActivity : AppCompatActivity() {
             val badgeText = "$pageCount ${if (pageCount == 1) "Page" else "Pages"}"
 
             val subTv = TextView(this).apply {
-                text = "$dateStr  |  $badgeText  |  ${sizeKb} KB"
+                text = "$dateStr • $badgeText • ${sizeKb}KB"
                 setTextColor(0xFF14532D.toInt())
-                textSize = 12f
-                setPadding(0, (4 * density).toInt(), 0, 0)
+                textSize = 11f
+                setPadding(0, (3 * density).toInt(), 0, 0)
             }
 
             infoCol.addView(titleTv)
             infoCol.addView(subTv)
 
+            // Direct 1-Tap Share button on every card (OK Scanner style)
+            val shareBtn = MaterialButton(this).apply {
+                text = "Share"
+                textSize = 11f
+                minWidth = 0
+                setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+                setBackgroundColor(0xFFF0FDF4.toInt())
+                setTextColor(0xFF14532D.toInt())
+                setOnClickListener { shareDocumentFile(file, isPdf) }
+            }
+
             val moreBtn = MaterialButton(this).apply {
                 text = "⋮"
                 textSize = 18f
                 minWidth = 0
+                setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
                 setBackgroundColor(0x00000000)
                 setTextColor(0xFF475569.toInt())
                 setOnClickListener { showDocumentOptions(file, isPdf) }
@@ -324,6 +341,7 @@ class MainActivity : AppCompatActivity() {
 
             row.addView(thumbCard)
             row.addView(infoCol)
+            row.addView(shareBtn)
             row.addView(moreBtn)
             card.addView(row)
             card.setOnClickListener { openDocument(file, isPdf) }
