@@ -17,6 +17,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -81,7 +82,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Security Shield: Hide sensitive document thumbnails in Recent Apps switcher & block spy screenshots
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+
         setContentView(R.layout.activity_main)
+        migrateLegacyExternalDocsToPrivateSandbox()
 
         recentDocsContainer = findViewById(R.id.recentDocsContainer)
         tvAllDocsCount = findViewById(R.id.tvAllDocsCount)
@@ -132,6 +141,32 @@ class MainActivity : AppCompatActivity() {
         loadSavedDocuments()
     }
 
+    private fun getSecureStorageDir(): File {
+        val dir = File(filesDir, "DocMitra")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    // Automatically move any older exposed files from External Storage into encrypted-sandbox filesDir
+    private fun migrateLegacyExternalDocsToPrivateSandbox() {
+        try {
+            val legacyDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
+            if (legacyDir.exists() && legacyDir.isDirectory) {
+                val secureDir = getSecureStorageDir()
+                legacyDir.listFiles()?.forEach { oldFile ->
+                    if (oldFile.isFile) {
+                        val dest = File(secureDir, oldFile.name)
+                        if (!dest.exists()) {
+                            oldFile.copyTo(dest, overwrite = false)
+                        }
+                        oldFile.delete()
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private fun switchTab(showDocs: Boolean) {
         if (showDocs) {
             viewDocsTab.visibility = View.VISIBLE
@@ -171,8 +206,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadSavedDocuments() {
         recentDocsContainer.removeAllViews()
-        val dir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
-        if (!dir.exists()) dir.mkdirs()
+        val dir = getSecureStorageDir()
 
         val allFiles = dir.listFiles { file ->
             file.isFile && (file.extension.equals("pdf", ignoreCase = true) || file.extension.equals("jpg", ignoreCase = true))
@@ -191,9 +225,9 @@ class MainActivity : AppCompatActivity() {
                 text = if (currentSearchQuery.isNotEmpty()) {
                     "No matching document found."
                 } else if (isHindi) {
-                    "अभी कोई डॉक्यूमेंट सेव नहीं है। नीचे कैमरा बटन से फोटो खींचें और उसे नाम देकर सेव करें।"
+                    "अभी कोई डॉक्यूमेंट सेव नहीं है। नीचे कैमरा बटन से फोटो खींचें और उसे नाम देकर सुरक्षित सेव करें।"
                 } else {
-                    "No saved documents yet. Tap the Camera button below to scan and save your first document."
+                    "No saved documents yet. Tap the Camera button below to scan and save securely."
                 }
                 setTextColor(0xFF64748B.toInt())
                 textSize = 14f
@@ -318,7 +352,7 @@ class MainActivity : AppCompatActivity() {
                 pfd.close()
                 bmp
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -331,7 +365,7 @@ class MainActivity : AppCompatActivity() {
             renderer.close()
             pfd.close()
             count
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             1
         }
     }
@@ -508,7 +542,7 @@ class MainActivity : AppCompatActivity() {
             pdfDoc.close()
             jpgFile.delete()
             pdfFile
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -559,7 +593,10 @@ class MainActivity : AppCompatActivity() {
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val newName = input.text.toString().trim()
-                    .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "").trim()
+                    .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "")
+                    .replace("..", "")
+                    .trim()
+                    .take(50)
                 if (newName.isNotEmpty()) {
                     val dest = File(file.parentFile, "$newName.${file.extension}")
                     if (file.renameTo(dest)) {
