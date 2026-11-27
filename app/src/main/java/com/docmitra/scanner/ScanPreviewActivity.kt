@@ -17,6 +17,7 @@ import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.view.Gravity
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -45,13 +46,33 @@ class ScanPreviewActivity : AppCompatActivity() {
     private val originalBitmaps = ArrayList<Bitmap>()
     private val editedBitmaps = ArrayList<Bitmap>()
     private var currentIndex = 0
-    private var currentFilterMode = 1 // 0=Original, 1=Magic HD, 2=Doc Clear, 3=B&W Xerox
-    private var appendTargetPath: String? = null
+    private var currentFilterMode = 1
+    private var validatedAppendFile: File? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        appendTargetPath = intent.getStringExtra("APPEND_TARGET_PATH")
+        // Security Fix 1: Prevent background apps & Recent Apps preview from capturing sensitive documents
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+
+        val secureBaseDir = getSecureStorageDir()
+
+        // Security Fix 2: Strict Path Traversal Guard — only allow appending to files strictly inside DocMitra secure folder
+        val rawAppendPath = intent.getStringExtra("APPEND_TARGET_PATH")
+        if (!rawAppendPath.isNullOrBlank()) {
+            try {
+                val candidate = File(rawAppendPath).canonicalFile
+                val canonicalRoot = secureBaseDir.canonicalFile
+                if (candidate.parentFile == canonicalRoot && candidate.extension.equals("pdf", ignoreCase = true)) {
+                    validatedAppendFile = candidate
+                }
+            } catch (_: Exception) {
+                validatedAppendFile = null
+            }
+        }
 
         val density = resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
@@ -202,7 +223,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         val btnSaveInApp = makeActionBtn(
-            if (appendTargetPath != null) "Add to File" else "Save App",
+            if (validatedAppendFile != null) "Add to File" else "Save App",
             0xFF14532D.toInt()
         )
         val btnSaveGallery = makeActionBtn("Gallery", 0xFFEA580C.toInt())
@@ -216,10 +237,10 @@ class ScanPreviewActivity : AppCompatActivity() {
         root.addView(controlsPanel)
         setContentView(root)
 
+        // Security Fix 3: Safe URI extraction with strict scheme check (only content:// allowed, blocks file:// hijacking)
         val uriStrings = ArrayList<String>()
         intent.getStringArrayListExtra("SCAN_URIS")?.let { uriStrings.addAll(it) }
 
-        // Handle images shared directly from WhatsApp / Gallery
         if (uriStrings.isEmpty()) {
             if (intent.action == Intent.ACTION_SEND) {
                 val singleUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -236,26 +257,42 @@ class ScanPreviewActivity : AppCompatActivity() {
                     @Suppress("DEPRECATION")
                     intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
                 }
-                multiUris?.forEach { uriStrings.add(it.toString()) }
+                multiUris?.take(20)?.forEach { uriStrings.add(it.toString()) }
             }
         }
 
-        for (uriStr in uriStrings) {
+        for (uriStr in uriStrings.take(20)) {
             try {
-                contentResolver.openInputStream(Uri.parse(uriStr))?.use { stream ->
-                    val bmp = BitmapFactory.decodeStream(stream)
+                val parsedUri = Uri.parse(uriStr)
+                if (parsedUri.scheme != "content") continue // Block local file:// theft attempts
+
+                // Downsample huge images safely to prevent OutOfMemory DoS crash
+                val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                contentResolver.openInputStream(parsedUri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, boundsOpts)
+                }
+                var sampleSize = 1
+                while (boundsOpts.outWidth / sampleSize > 2200 || boundsOpts.outHeight / sampleSize > 2200) {
+                    sampleSize *= 2
+                }
+
+                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                contentResolver.openInputStream(parsedUri)?.use { stream ->
+                    val bmp = BitmapFactory.decodeStream(stream, null, decodeOpts)
                     if (bmp != null) {
                         originalBitmaps.add(bmp)
                         editedBitmaps.add(processDocumentPro(bmp, 60, 65, 1))
                     }
                 }
+            } catch (_: SecurityException) {
+                // Ignore unauthorized URI access
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
 
         if (originalBitmaps.isEmpty()) {
-            Toast.makeText(this, "No scanned pages found", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No valid image found to scan", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -319,8 +356,8 @@ class ScanPreviewActivity : AppCompatActivity() {
         seekContrast.setOnSeekBarChangeListener(sliderListener)
 
         btnSaveInApp.setOnClickListener {
-            if (appendTargetPath != null) {
-                appendPagesToExistingPdf(File(appendTargetPath!!), shareImmediately = false)
+            if (validatedAppendFile != null) {
+                appendPagesToExistingPdf(validatedAppendFile!!, shareImmediately = false)
             } else {
                 promptNameAndSave(shareImmediately = false)
             }
@@ -331,12 +368,27 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         btnSharePdf.setOnClickListener {
-            if (appendTargetPath != null) {
-                appendPagesToExistingPdf(File(appendTargetPath!!), shareImmediately = true)
+            if (validatedAppendFile != null) {
+                appendPagesToExistingPdf(validatedAppendFile!!, shareImmediately = true)
             } else {
                 promptNameAndSave(shareImmediately = true)
             }
         }
+    }
+
+    // Security Fix 4: Store all documents inside internal app sandbox (filesDir) so USB/PC & rogue apps cannot read them
+    private fun getSecureStorageDir(): File {
+        val dir = File(filesDir, "DocMitra")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    private fun sanitizeFileName(raw: String, fallback: String): String {
+        val cleaned = raw.replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "")
+            .replace("..", "")
+            .trim()
+            .take(50)
+        return cleaned.ifEmpty { fallback }
     }
 
     private fun updatePageDisplay() {
@@ -529,15 +581,12 @@ class ScanPreviewActivity : AppCompatActivity() {
             .setTitle("Save Document As")
             .setView(input)
             .setPositiveButton("Save (Can Add More Later)") { _, _ ->
-                val cleanName = input.text.toString().trim()
-                    .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "").trim()
-                    .ifEmpty { defaultName }
-                val appDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
-                if (!appDir.exists()) appDir.mkdirs()
+                val cleanName = sanitizeFileName(input.text.toString(), defaultName)
+                val appDir = getSecureStorageDir()
 
                 val pdfFile = File(appDir, "$cleanName.pdf")
                 createPdfFromBitmaps(editedBitmaps, pdfFile)
-                Toast.makeText(this, "Saved '$cleanName'! You can add more photos anytime.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Saved securely in '$cleanName'!", Toast.LENGTH_LONG).show()
                 if (shareImmediately) {
                     shareFile(pdfFile, "application/pdf")
                 } else {
@@ -589,8 +638,7 @@ class ScanPreviewActivity : AppCompatActivity() {
     private fun saveAllImagesToGallery() {
         try {
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val appDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
-            if (!appDir.exists()) appDir.mkdirs()
+            val appDir = getSecureStorageDir()
 
             for (i in editedBitmaps.indices) {
                 val fileName = "DocMitra_${timeStamp}_P${i + 1}.jpg"
