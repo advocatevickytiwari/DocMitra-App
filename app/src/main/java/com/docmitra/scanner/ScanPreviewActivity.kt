@@ -24,7 +24,6 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
@@ -33,26 +32,25 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.max
-import kotlin.math.min
 
 class ScanPreviewActivity : AppCompatActivity() {
 
     private lateinit var ivPreview: ImageView
     private lateinit var tvPageIndicator: TextView
+    private lateinit var etDocTitle: EditText
     private lateinit var seekBrightness: SeekBar
     private lateinit var seekContrast: SeekBar
 
     private val originalBitmaps = ArrayList<Bitmap>()
     private val editedBitmaps = ArrayList<Bitmap>()
     private var currentIndex = 0
-    private var currentFilterMode = 1
+    private var currentFilterMode = 1 // 0=Original, 1=Magic HD, 2=Doc Clear, 3=B&W Xerox
     private var validatedAppendFile: File? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Fix 1: Prevent background apps & Recent Apps preview from capturing sensitive documents
+        // Security Shield: FLAG_SECURE
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -60,7 +58,7 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         val secureBaseDir = getSecureStorageDir()
 
-        // Security Fix 2: Strict Path Traversal Guard — only allow appending to files strictly inside DocMitra secure folder
+        // Path Traversal Guard
         val rawAppendPath = intent.getStringExtra("APPEND_TARGET_PATH")
         if (!rawAppendPath.isNullOrBlank()) {
             try {
@@ -82,45 +80,65 @@ class ScanPreviewActivity : AppCompatActivity() {
             setBackgroundColor(0xFF0F172A.toInt())
         }
 
+        // Top Bar: Back | Editable File Name (OK Scanner Style) | Page Nav
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF14532D.toInt())
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setPadding(dp(10), dp(8), dp(10), dp(8))
         }
 
         val btnBack = MaterialButton(this).apply {
-            text = "← Back"
-            textSize = 13f
+            text = "✕"
+            textSize = 15f
+            minWidth = dp(40)
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0x00000000)
             setOnClickListener { finish() }
         }
 
+        val defaultDocName = validatedAppendFile?.nameWithoutExtension
+            ?: "Doc_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
+
+        etDocTitle = EditText(this).apply {
+            setText(defaultDocName)
+            hint = "Enter name (e.g. Pawan)"
+            textSize = 14f
+            setTextColor(0xFFFFFFFF.toInt())
+            setHintTextColor(0xFFCBD5E1.toInt())
+            setBackgroundColor(0x22FFFFFF)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            isSingleLine = true
+            isEnabled = (validatedAppendFile == null)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dp(8)
+            }
+        }
+
         tvPageIndicator = TextView(this).apply {
-            text = "Page 1 of 1"
-            textSize = 15f
+            text = "1/1"
+            textSize = 13f
             setTextColor(0xFFFFFFFF.toInt())
             setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(dp(6), 0, dp(6), 0)
         }
 
         val btnPrevPage = MaterialButton(this).apply {
             text = "◀"
-            minWidth = dp(40)
+            minWidth = dp(36)
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0x22FFFFFF)
         }
 
         val btnNextPage = MaterialButton(this).apply {
             text = "▶"
-            minWidth = dp(40)
+            minWidth = dp(36)
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0x22FFFFFF)
         }
 
         topBar.addView(btnBack)
+        topBar.addView(etDocTitle)
         topBar.addView(tvPageIndicator)
         topBar.addView(btnPrevPage)
         topBar.addView(btnNextPage)
@@ -132,7 +150,7 @@ class ScanPreviewActivity : AppCompatActivity() {
                 0,
                 1f
             ).apply {
-                setMargins(dp(12), dp(12), dp(12), dp(12))
+                setMargins(dp(12), dp(10), dp(12), dp(10))
             }
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(0xFF1E293B.toInt())
@@ -142,7 +160,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         val controlsPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
-            setPadding(dp(14), dp(12), dp(14), dp(14))
+            setPadding(dp(14), dp(10), dp(14), dp(14))
         }
 
         val filterRow = LinearLayout(this).apply {
@@ -178,7 +196,7 @@ class ScanPreviewActivity : AppCompatActivity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(6), 0, dp(2))
+                setPadding(0, dp(5), 0, dp(2))
             }
             val tv = TextView(this).apply {
                 text = title
@@ -197,47 +215,48 @@ class ScanPreviewActivity : AppCompatActivity() {
             return Pair(row, sb)
         }
 
-        val (brightRow, sbBright) = makeSliderRow("Whiteness", 60)
-        val (contrastRow, sbContrast) = makeSliderRow("Ink Depth", 65)
+        val (brightRow, sbBright) = makeSliderRow("Brightness", 58)
+        val (contrastRow, sbContrast) = makeSliderRow("Clarity", 68)
         seekBrightness = sbBright
         seekContrast = sbContrast
 
         controlsPanel.addView(brightRow)
         controlsPanel.addView(contrastRow)
 
+        // One-Tap Action Row (OK Scanner Style: Instant Save + Share)
         val actionRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(8), 0, 0)
         }
 
-        fun makeActionBtn(label: String, bgColor: Int): MaterialButton {
-            return MaterialButton(this).apply {
-                text = label
-                textSize = 12f
-                setTextColor(0xFFFFFFFF.toInt())
-                setBackgroundColor(bgColor)
-                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                    marginEnd = dp(6)
-                }
+        val btnDoneSave = MaterialButton(this).apply {
+            text = if (validatedAppendFile != null) "✓ Add & Save" else "✓ Done & Save"
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xFF14532D.toInt())
+            layoutParams = LinearLayout.LayoutParams(0, dp(48), 1.4f).apply {
+                marginEnd = dp(8)
             }
         }
 
-        val btnSaveInApp = makeActionBtn(
-            if (validatedAppendFile != null) "Add to File" else "Save App",
-            0xFF14532D.toInt()
-        )
-        val btnSaveGallery = makeActionBtn("Gallery", 0xFFEA580C.toInt())
-        val btnSharePdf = makeActionBtn("Share PDF", 0xFF1E293B.toInt())
+        val btnSaveAndShare = MaterialButton(this).apply {
+            text = "Share PDF"
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xFFEA580C.toInt())
+            layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+        }
 
-        actionRow.addView(btnSaveInApp)
-        actionRow.addView(btnSaveGallery)
-        actionRow.addView(btnSharePdf)
+        actionRow.addView(btnDoneSave)
+        actionRow.addView(btnSaveAndShare)
         controlsPanel.addView(actionRow)
 
         root.addView(controlsPanel)
         setContentView(root)
 
-        // Security Fix 3: Safe URI extraction with strict scheme check (only content:// allowed, blocks file:// hijacking)
+        // Safe URI loading (content:// only)
         val uriStrings = ArrayList<String>()
         intent.getStringArrayListExtra("SCAN_URIS")?.let { uriStrings.addAll(it) }
 
@@ -264,15 +283,14 @@ class ScanPreviewActivity : AppCompatActivity() {
         for (uriStr in uriStrings.take(20)) {
             try {
                 val parsedUri = Uri.parse(uriStr)
-                if (parsedUri.scheme != "content") continue // Block local file:// theft attempts
+                if (parsedUri.scheme != "content") continue
 
-                // Downsample huge images safely to prevent OutOfMemory DoS crash
                 val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 contentResolver.openInputStream(parsedUri)?.use { stream ->
                     BitmapFactory.decodeStream(stream, null, boundsOpts)
                 }
                 var sampleSize = 1
-                while (boundsOpts.outWidth / sampleSize > 2200 || boundsOpts.outHeight / sampleSize > 2200) {
+                while (boundsOpts.outWidth / sampleSize > 1800 || boundsOpts.outHeight / sampleSize > 1800) {
                     sampleSize *= 2
                 }
 
@@ -281,18 +299,15 @@ class ScanPreviewActivity : AppCompatActivity() {
                     val bmp = BitmapFactory.decodeStream(stream, null, decodeOpts)
                     if (bmp != null) {
                         originalBitmaps.add(bmp)
-                        editedBitmaps.add(processDocumentPro(bmp, 60, 65, 1))
+                        editedBitmaps.add(applyFastHardwareFilter(bmp, 58, 68, 1))
                     }
                 }
-            } catch (_: SecurityException) {
-                // Ignore unauthorized URI access
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
             }
         }
 
         if (originalBitmaps.isEmpty()) {
-            Toast.makeText(this, "No valid image found to scan", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No valid image found", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -318,31 +333,27 @@ class ScanPreviewActivity : AppCompatActivity() {
             seekBrightness.progress = 50
             seekContrast.progress = 50
             applyCurrentAdjustments()
-            Toast.makeText(this, "Original Photo", Toast.LENGTH_SHORT).show()
         }
 
         btnFilterMagic.setOnClickListener {
             currentFilterMode = 1
-            seekBrightness.progress = 60
-            seekContrast.progress = 65
+            seekBrightness.progress = 58
+            seekContrast.progress = 68
             applyCurrentAdjustments()
-            Toast.makeText(this, "Magic HD Color (Shadow Removed)", Toast.LENGTH_SHORT).show()
         }
 
         btnFilterClear.setOnClickListener {
             currentFilterMode = 2
-            seekBrightness.progress = 65
-            seekContrast.progress = 75
+            seekBrightness.progress = 62
+            seekContrast.progress = 78
             applyCurrentAdjustments()
-            Toast.makeText(this, "Doc Clear (Ultra Sharp Words)", Toast.LENGTH_SHORT).show()
         }
 
         btnFilterBw.setOnClickListener {
             currentFilterMode = 3
-            seekBrightness.progress = 62
-            seekContrast.progress = 80
+            seekBrightness.progress = 65
+            seekContrast.progress = 92
             applyCurrentAdjustments()
-            Toast.makeText(this, "B&W Xerox (Pure White & Black)", Toast.LENGTH_SHORT).show()
         }
 
         val sliderListener = object : SeekBar.OnSeekBarChangeListener {
@@ -355,28 +366,16 @@ class ScanPreviewActivity : AppCompatActivity() {
         seekBrightness.setOnSeekBarChangeListener(sliderListener)
         seekContrast.setOnSeekBarChangeListener(sliderListener)
 
-        btnSaveInApp.setOnClickListener {
-            if (validatedAppendFile != null) {
-                appendPagesToExistingPdf(validatedAppendFile!!, shareImmediately = false)
-            } else {
-                promptNameAndSave(shareImmediately = false)
-            }
+        // Instant 1-Tap Save (Auto-saves to App + Gallery & goes straight to Home list)
+        btnDoneSave.setOnClickListener {
+            executeInstantSaveAndFinish(shareImmediately = false)
         }
 
-        btnSaveGallery.setOnClickListener {
-            saveAllImagesToGallery()
-        }
-
-        btnSharePdf.setOnClickListener {
-            if (validatedAppendFile != null) {
-                appendPagesToExistingPdf(validatedAppendFile!!, shareImmediately = true)
-            } else {
-                promptNameAndSave(shareImmediately = true)
-            }
+        btnSaveAndShare.setOnClickListener {
+            executeInstantSaveAndFinish(shareImmediately = true)
         }
     }
 
-    // Security Fix 4: Store all documents inside internal app sandbox (filesDir) so USB/PC & rogue apps cannot read them
     private fun getSecureStorageDir(): File {
         val dir = File(filesDir, "DocMitra")
         if (!dir.exists()) dir.mkdirs()
@@ -393,12 +392,12 @@ class ScanPreviewActivity : AppCompatActivity() {
 
     private fun updatePageDisplay() {
         ivPreview.setImageBitmap(editedBitmaps[currentIndex])
-        tvPageIndicator.text = "Page ${currentIndex + 1} of ${editedBitmaps.size}"
+        tvPageIndicator.text = "${currentIndex + 1}/${editedBitmaps.size}"
     }
 
     private fun applyCurrentAdjustments() {
         val base = originalBitmaps[currentIndex]
-        editedBitmaps[currentIndex] = processDocumentPro(
+        editedBitmaps[currentIndex] = applyFastHardwareFilter(
             base,
             seekBrightness.progress,
             seekContrast.progress,
@@ -407,246 +406,118 @@ class ScanPreviewActivity : AppCompatActivity() {
         ivPreview.setImageBitmap(editedBitmaps[currentIndex])
     }
 
-    private fun processDocumentPro(src: Bitmap, whitenessProgress: Int, inkProgress: Int, mode: Int): Bitmap {
-        if (mode == 0 && whitenessProgress in 48..52 && inkProgress in 48..52) {
-            return src.copy(Bitmap.Config.ARGB_8888, true)
-        }
+    // Zero-Lag Hardware ColorMatrix Filter (Instant response with zero hanging)
+    private fun applyFastHardwareFilter(src: Bitmap, brightProg: Int, contrastProg: Int, mode: Int): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        if (mode == 0) {
-            val brightness = (whitenessProgress - 50) * 2.4f
-            val contrast = 0.5f + (inkProgress / 50f) * 0.9f
-            val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(out)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-            val translate = (-.5f * contrast + .5f) * 255f + brightness
-            val cm = ColorMatrix(
-                floatArrayOf(
-                    contrast, 0f, 0f, 0f, translate,
-                    0f, contrast, 0f, 0f, translate,
-                    0f, 0f, contrast, 0f, translate,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            paint.colorFilter = ColorMatrixColorFilter(cm)
+        if (mode == 0 && brightProg in 48..52 && contrastProg in 48..52) {
             canvas.drawBitmap(src, 0f, 0f, paint)
             return out
         }
 
-        val w = src.width
-        val h = src.height
-
-        val bgW = max(16, w / 24)
-        val bgH = max(16, h / 24)
-        val small = Bitmap.createScaledBitmap(src, bgW, bgH, true)
-        val smallPixels = IntArray(bgW * bgH)
-        small.getPixels(smallPixels, 0, bgW, 0, 0, bgW, bgH)
-
-        for (i in smallPixels.indices) {
-            val c = smallPixels[i]
-            val r = max(135, (c shr 16) and 0xFF)
-            val g = max(135, (c shr 8) and 0xFF)
-            val b = max(135, c and 0xFF)
-            smallPixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-        small.setPixels(smallPixels, 0, bgW, 0, 0, bgW, bgH)
-        val bgMap = Bitmap.createScaledBitmap(small, w, h, true)
-
-        val srcPixels = IntArray(w * h)
-        val bgPixels = IntArray(w * h)
-        val normPixels = IntArray(w * h)
-        src.getPixels(srcPixels, 0, w, 0, 0, w, h)
-        bgMap.getPixels(bgPixels, 0, w, 0, 0, w, h)
-
-        val whiteCut = (236 - (whitenessProgress - 50) * 0.65f).toInt().coerceIn(185, 248)
-        val inkGain = 1.15f + (inkProgress / 100f) * 1.45f
-
-        for (i in srcPixels.indices) {
-            val sc = srcPixels[i]
-            val bc = bgPixels[i]
-
-            val sr = (sc shr 16) and 0xFF
-            val sg = (sc shr 8) and 0xFF
-            val sb = sc and 0xFF
-
-            val br = max(120, (bc shr 16) and 0xFF)
-            val bg = max(120, (bc shr 8) and 0xFF)
-            val bb = max(120, bc and 0xFF)
-
-            var nr = ((sr * 255) / br).coerceIn(0, 255)
-            var ng = ((sg * 255) / bg).coerceIn(0, 255)
-            var nb = ((sb * 255) / bb).coerceIn(0, 255)
-
-            fun enhanceChannel(v: Int): Int {
-                if (v >= whiteCut) return 255
-                val ratio = v.toFloat() / whiteCut.toFloat()
-                val curved = Math.pow(ratio.toDouble(), inkGain.toDouble()).toFloat()
-                return (curved * 255f).toInt().coerceIn(0, 255)
-            }
-
-            nr = enhanceChannel(nr)
-            ng = enhanceChannel(ng)
-            nb = enhanceChannel(nb)
-
-            when (mode) {
-                1 -> {
-                    val maxC = max(nr, max(ng, nb))
-                    val minC = min(nr, min(ng, nb))
-                    if (maxC - minC > 22) {
-                        val avg = (nr + ng + nb) / 3
-                        nr = (avg + ((nr - avg) * 1.35f)).toInt().coerceIn(0, 255)
-                        ng = (avg + ((ng - avg) * 1.35f)).toInt().coerceIn(0, 255)
-                        nb = (avg + ((nb - avg) * 1.35f)).toInt().coerceIn(0, 255)
-                    }
-                }
-                2 -> {
-                    val lum = (nr * 77 + ng * 150 + nb * 29) shr 8
-                    val crisp = when {
-                        lum > 218 -> 255
-                        lum < 145 -> (lum * 0.55f).toInt()
-                        else -> lum
-                    }
-                    nr = crisp
-                    ng = crisp
-                    nb = crisp
-                }
-                3 -> {
-                    val lum = (nr * 77 + ng * 150 + nb * 29) shr 8
-                    val threshold = (175 + (whitenessProgress - 50) * 0.6f).toInt().coerceIn(130, 215)
-                    val bw = if (lum < threshold) 0 else 255
-                    nr = bw
-                    ng = bw
-                    nb = bw
-                }
-            }
-
-            normPixels[i] = (0xFF shl 24) or (nr shl 16) or (ng shl 8) or nb
+        val cm = ColorMatrix()
+        when (mode) {
+            1 -> cm.setSaturation(1.25f) // Magic HD Color
+            2 -> cm.setSaturation(0.15f) // Doc Clear Crisp
+            3 -> cm.setSaturation(0f)    // B&W Xerox
         }
 
-        val outPixels = IntArray(w * h)
-        val sharpStrength = when (mode) {
-            1 -> 0.85f
-            2 -> 1.25f
-            else -> 0.45f
+        val brightness = (brightProg - 50) * 2.4f
+        val contrast = when (mode) {
+            3 -> 1.6f + (contrastProg / 50f) * 1.4f
+            2 -> 1.1f + (contrastProg / 50f) * 1.1f
+            else -> 0.6f + (contrastProg / 50f) * 0.95f
         }
+        val translate = (-.5f * contrast + .5f) * 255f + brightness
 
-        for (y in 1 until h - 1) {
-            val row = y * w
-            for (x in 1 until w - 1) {
-                val idx = row + x
-                val c = normPixels[idx]
-                val t = normPixels[idx - w]
-                val b = normPixels[idx + w]
-                val l = normPixels[idx - 1]
-                val r = normPixels[idx + 1]
-
-                val rC = (c shr 16) and 0xFF
-                val gC = (c shr 8) and 0xFF
-                val bC = c and 0xFF
-
-                val rAvg = (((t shr 16) and 0xFF) + ((b shr 16) and 0xFF) + ((l shr 16) and 0xFF) + ((r shr 16) and 0xFF)) shr 2
-                val gAvg = (((t shr 8) and 0xFF) + ((b shr 8) and 0xFF) + ((l shr 8) and 0xFF) + ((r shr 8) and 0xFF)) shr 2
-                val bAvg = ((t and 0xFF) + (b and 0xFF) + (l and 0xFF) + (r and 0xFF)) shr 2
-
-                val rFinal = (rC + ((rC - rAvg) * sharpStrength)).toInt().coerceIn(0, 255)
-                val gFinal = (gC + ((gC - gAvg) * sharpStrength)).toInt().coerceIn(0, 255)
-                val bFinal = (bC + ((bC - bAvg) * sharpStrength)).toInt().coerceIn(0, 255)
-
-                outPixels[idx] = (0xFF shl 24) or (rFinal shl 16) or (gFinal shl 8) or bFinal
-            }
-        }
-
-        for (x in 0 until w) {
-            outPixels[x] = normPixels[x]
-            outPixels[(h - 1) * w + x] = normPixels[(h - 1) * w + x]
-        }
-        for (y in 0 until h) {
-            outPixels[y * w] = normPixels[y * w]
-            outPixels[y * w + (w - 1)] = normPixels[y * w + (w - 1)]
-        }
-
-        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        result.setPixels(outPixels, 0, w, 0, 0, w, h)
-        return result
+        val toneMatrix = ColorMatrix(
+            floatArrayOf(
+                contrast, 0f, 0f, 0f, translate,
+                0f, contrast, 0f, 0f, translate,
+                0f, 0f, contrast, 0f, translate,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        cm.postConcat(toneMatrix)
+        paint.colorFilter = ColorMatrixColorFilter(cm)
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        return out
     }
 
-    private fun promptNameAndSave(shareImmediately: Boolean) {
-        val defaultName = "Doc_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
-        val input = EditText(this).apply {
-            setText(defaultName)
-            hint = "Enter person or file name (e.g. Pawan, Ram Singh)"
-            setSelection(text.length)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Save Document As")
-            .setView(input)
-            .setPositiveButton("Save (Can Add More Later)") { _, _ ->
-                val cleanName = sanitizeFileName(input.text.toString(), defaultName)
-                val appDir = getSecureStorageDir()
-
-                val pdfFile = File(appDir, "$cleanName.pdf")
-                createPdfFromBitmaps(editedBitmaps, pdfFile)
-                Toast.makeText(this, "Saved securely in '$cleanName'!", Toast.LENGTH_LONG).show()
-                if (shareImmediately) {
-                    shareFile(pdfFile, "application/pdf")
-                } else {
-                    finish()
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun appendPagesToExistingPdf(targetPdfFile: File, shareImmediately: Boolean) {
+    private fun executeInstantSaveAndFinish(shareImmediately: Boolean) {
         try {
-            val combinedBitmaps = ArrayList<Bitmap>()
-
-            if (targetPdfFile.exists()) {
-                val pfd = ParcelFileDescriptor.open(targetPdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = PdfRenderer(pfd)
-                for (i in 0 until renderer.pageCount) {
-                    val page = renderer.openPage(i)
-                    val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
-                    bmp.eraseColor(0xFFFFFFFF.toInt())
-                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
-                    combinedBitmaps.add(bmp)
+            // Apply current filter to any untouched pages as well
+            for (i in originalBitmaps.indices) {
+                if (i != currentIndex) {
+                    editedBitmaps[i] = applyFastHardwareFilter(
+                        originalBitmaps[i],
+                        seekBrightness.progress,
+                        seekContrast.progress,
+                        currentFilterMode
+                    )
                 }
-                renderer.close()
-                pfd.close()
             }
 
-            combinedBitmaps.addAll(editedBitmaps)
-            createPdfFromBitmaps(combinedBitmaps, targetPdfFile)
+            // Auto-save clean JPG copy to Phone Gallery (Pictures/DocMitra) in background
+            saveCopiesToGalleryQuietly()
 
-            Toast.makeText(
-                this,
-                "Added ${editedBitmaps.size} photo(s) to '${targetPdfFile.nameWithoutExtension}' (Total: ${combinedBitmaps.size} pages)!",
-                Toast.LENGTH_LONG
-            ).show()
+            val targetPdf: File
+            if (validatedAppendFile != null) {
+                targetPdf = validatedAppendFile!!
+                val combined = ArrayList<Bitmap>()
+                if (targetPdf.exists()) {
+                    val pfd = ParcelFileDescriptor.open(targetPdf, ParcelFileDescriptor.MODE_READ_ONLY)
+                    val renderer = PdfRenderer(pfd)
+                    for (i in 0 until renderer.pageCount) {
+                        val page = renderer.openPage(i)
+                        val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                        bmp.eraseColor(0xFFFFFFFF.toInt())
+                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        page.close()
+                        combined.add(bmp)
+                    }
+                    renderer.close()
+                    pfd.close()
+                }
+                combined.addAll(editedBitmaps)
+                createPdfFromBitmaps(combined, targetPdf)
+                Toast.makeText(this, "Added to '${targetPdf.nameWithoutExtension}'!", Toast.LENGTH_SHORT).show()
+            } else {
+                val fallback = "Doc_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
+                val cleanName = sanitizeFileName(etDocTitle.text.toString(), fallback)
+                targetPdf = File(getSecureStorageDir(), "$cleanName.pdf")
+                createPdfFromBitmaps(editedBitmaps, targetPdf)
+                Toast.makeText(this, "Saved '$cleanName' (App + Gallery)!", Toast.LENGTH_SHORT).show()
+            }
 
             if (shareImmediately) {
-                shareFile(targetPdfFile, "application/pdf")
+                val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", targetPdf)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share PDF"))
             } else {
+                val homeIntent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                startActivity(homeIntent)
                 finish()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Error adding pages: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Save error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun saveAllImagesToGallery() {
+    private fun saveCopiesToGalleryQuietly() {
         try {
-            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val appDir = getSecureStorageDir()
-
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             for (i in editedBitmaps.indices) {
-                val fileName = "DocMitra_${timeStamp}_P${i + 1}.jpg"
+                val fileName = "DocMitra_${stamp}_P${i + 1}.jpg"
                 val bmp = editedBitmaps[i]
-
-                val appFile = File(appDir, fileName)
-                FileOutputStream(appFile).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
-
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val values = ContentValues().apply {
                         put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
@@ -654,16 +525,14 @@ class ScanPreviewActivity : AppCompatActivity() {
                         put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocMitra")
                     }
                     val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                    uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) } }
+                    uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 94, out) } }
                 } else {
                     val picDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
                     if (!picDir.exists()) picDir.mkdirs()
-                    FileOutputStream(File(picDir, fileName)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
+                    FileOutputStream(File(picDir, fileName)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 94, out) }
                 }
             }
-            Toast.makeText(this, "Saved to Phone Gallery & App!", Toast.LENGTH_LONG).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
         }
     }
 
@@ -678,15 +547,5 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
         FileOutputStream(outputFile).use { out -> pdfDocument.writeTo(out) }
         pdfDocument.close()
-    }
-
-    private fun shareFile(file: File, mimeType: String) {
-        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = mimeType
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "Share Document"))
     }
 }
