@@ -45,6 +45,7 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
 
     private var isHindi = false
+    private var sortByName = false
     private var currentSearchQuery = ""
     private var targetProjectFolderForScan: String? = null
     private var tempDirectCamFile: File? = null
@@ -54,6 +55,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var recentDocsContainer: LinearLayout
     private lateinit var tvAllDocsCount: TextView
+    private lateinit var btnSortDocs: MaterialButton
     private lateinit var viewDocsTab: LinearLayout
     private lateinit var viewToolsTab: ScrollView
     private lateinit var ivTabDocs: ImageView
@@ -88,7 +90,7 @@ class MainActivity : AppCompatActivity() {
     ) { uris ->
         if (!uris.isNullOrEmpty()) {
             val copiedUris = ArrayList<String>()
-            for ((idx, srcUri) in uris.take(20).withIndex()) {
+            for ((idx, srcUri) in uris.take(25).withIndex()) {
                 copyUriToSafeCacheFile(srcUri, "gal_${System.currentTimeMillis()}_$idx.jpg")?.let {
                     copiedUris.add(it.toString())
                 }
@@ -137,7 +139,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Shield: FLAG_SECURE
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -147,6 +148,7 @@ class MainActivity : AppCompatActivity() {
 
         recentDocsContainer = findViewById(R.id.recentDocsContainer)
         tvAllDocsCount = findViewById(R.id.tvAllDocsCount)
+        btnSortDocs = findViewById(R.id.btnSortDocs)
         viewDocsTab = findViewById(R.id.viewDocsTab)
         viewToolsTab = findViewById(R.id.viewToolsTab)
         ivTabDocs = findViewById(R.id.ivTabDocs)
@@ -171,10 +173,24 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, AboutActivity::class.java))
         }
 
+        // Direct 1-Tap Gallery Import button right next to Search Bar (OKEN Workflow)
+        findViewById<MaterialButton>(R.id.btnQuickGallery).setOnClickListener {
+            targetProjectFolderForScan = null
+            galleryMultiLauncher.launch("image/*")
+        }
+
+        // Sort Toggle (Recent vs Name A-Z)
+        btnSortDocs.setOnClickListener {
+            sortByName = !sortByName
+            btnSortDocs.text = if (sortByName) "⇅ Sort: Name" else "⇅ Sort: Recent"
+            loadProjectFolders()
+        }
+
+        // Center Floating Orange Camera Button -> Smart Auto-Border Scanner
         findViewById<MaterialCardView>(R.id.cardCamScan).setOnClickListener {
             if (isBusyProcessing) return@setOnClickListener
             targetProjectFolderForScan = null
-            showScanSourceChooser()
+            startSmartMlKitScanner()
         }
 
         findViewById<LinearLayout>(R.id.navTabDocs).setOnClickListener {
@@ -216,12 +232,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScanSourceChooser() {
         val options = arrayOf(
-            "📄 Smart Auto-Crop Scanner",
+            "📄 Smart Auto-Border Camera",
             "📷 Direct Phone Camera",
             "🖼 Choose from Gallery"
         )
         AlertDialog.Builder(this)
-            .setTitle("Scan Document")
+            .setTitle("Add Pages")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> startSmartMlKitScanner()
@@ -254,9 +270,9 @@ class MainActivity : AppCompatActivity() {
     private fun startSmartMlKitScanner() {
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
-            .setPageLimit(20)
+            .setPageLimit(25)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .build()
 
         GmsDocumentScanning.getClient(options).getStartScanIntent(this)
@@ -384,14 +400,20 @@ class MainActivity : AppCompatActivity() {
         recentDocsContainer.removeAllViews()
         val root = getSecureProjectsRoot()
 
-        val allProjects = root.listFiles { file ->
+        val rawProjects = root.listFiles { file ->
             file.isDirectory && (file.listFiles { f -> f.isFile && f.extension.equals("jpg", ignoreCase = true) }?.isNotEmpty() == true)
-        }?.sortedByDescending { it.lastModified() } ?: emptyList()
+        }?.toList() ?: emptyList()
+
+        val sortedProjects = if (sortByName) {
+            rawProjects.sortedBy { it.name.lowercase(Locale.getDefault()) }
+        } else {
+            rawProjects.sortedByDescending { it.lastModified() }
+        }
 
         val filteredProjects = if (currentSearchQuery.isEmpty()) {
-            allProjects
+            sortedProjects
         } else {
-            allProjects.filter { it.name.contains(currentSearchQuery, ignoreCase = true) }
+            sortedProjects.filter { it.name.contains(currentSearchQuery, ignoreCase = true) }
         }
 
         tvAllDocsCount.text = if (isHindi) "सभी फाइलें (${filteredProjects.size})" else "All docs (${filteredProjects.size})"
@@ -401,9 +423,9 @@ class MainActivity : AppCompatActivity() {
                 text = if (currentSearchQuery.isNotEmpty()) {
                     "No matching document found."
                 } else if (isHindi) {
-                    "नीचे ऑरेंज कैमरा बटन दबाएं → Camera या Gallery चुनें → मोहर/साइन लगाएं और '✓ Save HD' दबाएं।"
+                    "नीचे ऑरेंज कैमरा बटन दबाएं (या ऊपर '🖼 Import' से गैलरी चुनें) → फ़िल्टर व मोहर लगाएं और Done दबाएं।"
                 } else {
-                    "Tap the orange Camera button below to choose Camera or Gallery, add Mohar/Sign, and Save HD."
+                    "Tap the orange Camera button below (or '🖼 Import' above) to scan, apply filters/Mohar, and Save HD."
                 }
                 setTextColor(0xFF64748B.toInt())
                 textSize = 14f
@@ -479,7 +501,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val dateStr = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(projDir.lastModified()))
-            val badgeText = "${pages.size}${if (pages.size == 1) "Page" else "Pages"}"
+            val badgeText = "${pages.size} ${if (pages.size == 1) "Page" else "Pages"}"
 
             val subTv = TextView(this).apply {
                 text = "$dateStr • $badgeText • HD"
@@ -494,8 +516,11 @@ class MainActivity : AppCompatActivity() {
             val shareBtn = MaterialButton(this).apply {
                 text = "Share"
                 textSize = 11f
+                isAllCaps = false
                 minWidth = 0
-                setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+                insetTop = 0
+                insetBottom = 0
+                setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
                 setBackgroundColor(0xFFF0FDF4.toInt())
                 setTextColor(0xFF14532D.toInt())
                 setOnClickListener { shareProjectAsPdfAsync(projDir, pages) }
@@ -505,6 +530,8 @@ class MainActivity : AppCompatActivity() {
                 text = "⋮"
                 textSize = 18f
                 minWidth = 0
+                insetTop = 0
+                insetBottom = 0
                 setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
                 setBackgroundColor(0x00000000)
                 setTextColor(0xFF475569.toInt())
@@ -530,8 +557,8 @@ class MainActivity : AppCompatActivity() {
     private fun showProjectOptions(projDir: File, pages: List<File>) {
         val options = arrayOf(
             "Open Full-Screen (Zoom & Reorder)",
-            "+ Add More Photos",
-            "Rename (e.g. Pawan / Ram Singh)",
+            "+ Add More Pages",
+            "Rename Document",
             "Share HD PDF",
             "Delete File"
         )
