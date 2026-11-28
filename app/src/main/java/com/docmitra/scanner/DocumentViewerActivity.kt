@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -26,6 +27,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -35,12 +37,16 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import java.util.concurrent.Executors
+import kotlin.math.min
 
 class DocumentViewerActivity : AppCompatActivity() {
 
     private lateinit var projectDir: File
     private lateinit var pagesContainer: LinearLayout
     private lateinit var tvHeaderTitle: TextView
+    @Volatile private var isOperationRunning = false
+    private val workerExecutor = Executors.newSingleThreadExecutor()
 
     private val scannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -98,7 +104,6 @@ class DocumentViewerActivity : AppCompatActivity() {
             setBackgroundColor(0xFFF1F5F9.toInt())
         }
 
-        // Top Header Bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -137,7 +142,6 @@ class DocumentViewerActivity : AppCompatActivity() {
         topBar.addView(btnAddPage)
         root.addView(topBar)
 
-        // Scrollable Full-Screen Pages Area
         val scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -153,7 +157,6 @@ class DocumentViewerActivity : AppCompatActivity() {
         scrollView.addView(pagesContainer)
         root.addView(scrollView)
 
-        // Bottom Export & Share Bar
         val bottomBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -169,7 +172,7 @@ class DocumentViewerActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, dp(46), 1.2f).apply {
                 marginEnd = dp(8)
             }
-            setOnClickListener { exportAndSharePdf() }
+            setOnClickListener { exportAndSharePdfAsync() }
         }
 
         val btnShareJpg = MaterialButton(this).apply {
@@ -192,6 +195,11 @@ class DocumentViewerActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         renderProjectPages()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        workerExecutor.shutdownNow()
     }
 
     private fun getSortedPageFiles(): List<File> {
@@ -229,7 +237,6 @@ class DocumentViewerActivity : AppCompatActivity() {
                 setPadding(dp(10), dp(8), dp(10), dp(10))
             }
 
-            // Page Control Bar: Page # | Move Up | Move Down | Rotate | Mohar/Zoom | Delete
             val ctrlRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -256,7 +263,9 @@ class DocumentViewerActivity : AppCompatActivity() {
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         dp(34)
                     ).apply { marginStart = dp(4) }
-                    setOnClickListener { onClick() }
+                    setOnClickListener {
+                        if (!isOperationRunning) onClick()
+                    }
                 }
             }
 
@@ -275,7 +284,7 @@ class DocumentViewerActivity : AppCompatActivity() {
             }
 
             ctrlRow.addView(miniBtn("↻", 0xFFE2E8F0.toInt(), 0xFF14532D.toInt()) {
-                rotatePageFile(pageFile)
+                rotatePageFileAsync(pageFile)
             })
 
             ctrlRow.addView(miniBtn("🔏 Mohar", 0xFFDCFCE7.toInt(), 0xFF14532D.toInt()) {
@@ -339,16 +348,21 @@ class DocumentViewerActivity : AppCompatActivity() {
     }
 
     private fun openPageInStampStudio(pageFile: File) {
-        // Replace this page after applying Mohar/Sign by opening via FileProvider URI
-        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", pageFile)
-        pageFile.delete()
-        normalizePageFileNames()
-        val intent = Intent(this, ScanPreviewActivity::class.java).apply {
-            putStringArrayListExtra("SCAN_URIS", arrayListOf(uri.toString()))
-            putExtra("TARGET_PROJECT_DIR", projectDir.absolutePath)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            val tempCopy = File(cacheDir, "stamp_edit_${System.currentTimeMillis()}.jpg")
+            pageFile.copyTo(tempCopy, overwrite = true)
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", tempCopy)
+            pageFile.delete()
+            normalizePageFileNames()
+            val intent = Intent(this, ScanPreviewActivity::class.java).apply {
+                putStringArrayListExtra("SCAN_URIS", arrayListOf(uri.toString()))
+                putExtra("TARGET_PROJECT_DIR", projectDir.absolutePath)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error opening editor: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-        startActivity(intent)
     }
 
     private fun swapPages(fileA: File, fileB: File) {
@@ -370,18 +384,32 @@ class DocumentViewerActivity : AppCompatActivity() {
         }
     }
 
-    private fun rotatePageFile(file: File) {
-        try {
-            val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
-            val matrix = Matrix().apply { postRotate(90f) }
-            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-            FileOutputStream(file).use { out ->
-                rotated.compress(Bitmap.CompressFormat.JPEG, 95, out)
+    private fun rotatePageFileAsync(file: File) {
+        if (isOperationRunning) return
+        isOperationRunning = true
+        workerExecutor.execute {
+            try {
+                val bmp = BitmapFactory.decodeFile(file.absolutePath)
+                if (bmp != null) {
+                    val matrix = Matrix().apply { postRotate(90f) }
+                    val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                    FileOutputStream(file).use { out ->
+                        rotated.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    }
+                    bmp.recycle()
+                    rotated.recycle()
+                    projectDir.setLastModified(System.currentTimeMillis())
+                }
+                runOnUiThread {
+                    isOperationRunning = false
+                    if (!isFinishing && !isDestroyed) renderProjectPages()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    isOperationRunning = false
+                    Toast.makeText(this, "Rotate failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
-            projectDir.setLastModified(System.currentTimeMillis())
-            renderProjectPages()
-        } catch (e: Exception) {
-            Toast.makeText(this, "Rotate failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -390,7 +418,7 @@ class DocumentViewerActivity : AppCompatActivity() {
             .setGalleryImportAllowed(true)
             .setPageLimit(20)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE_WITH_FILTER)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
             .build()
 
         GmsDocumentScanning.getClient(options).getStartScanIntent(this)
@@ -399,34 +427,49 @@ class DocumentViewerActivity : AppCompatActivity() {
             }
     }
 
-    private fun exportAndSharePdf() {
-        try {
-            val pages = getSortedPageFiles()
-            if (pages.isEmpty()) return
+    private fun exportAndSharePdfAsync() {
+        if (isOperationRunning) return
+        val pages = getSortedPageFiles()
+        if (pages.isEmpty()) return
 
-            val cachePdf = File(cacheDir, "${projectDir.name}.pdf")
-            val pdfDoc = PdfDocument()
-            pages.forEachIndexed { idx, imgFile ->
-                val bmp = BitmapFactory.decodeFile(imgFile.absolutePath)
-                if (bmp != null) {
-                    val info = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, idx + 1).create()
-                    val page = pdfDoc.startPage(info)
-                    page.canvas.drawBitmap(bmp, 0f, 0f, null)
-                    pdfDoc.finishPage(page)
+        isOperationRunning = true
+        Toast.makeText(this, "Creating HD PDF...", Toast.LENGTH_SHORT).show()
+
+        workerExecutor.execute {
+            try {
+                val cachePdf = File(cacheDir, "${projectDir.name}.pdf")
+                val pdfDoc = PdfDocument()
+                pages.forEachIndexed { idx, imgFile ->
+                    val bmp = BitmapFactory.decodeFile(imgFile.absolutePath)
+                    if (bmp != null) {
+                        val info = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, idx + 1).create()
+                        val page = pdfDoc.startPage(info)
+                        page.canvas.drawBitmap(bmp, 0f, 0f, null)
+                        pdfDoc.finishPage(page)
+                        bmp.recycle()
+                    }
+                }
+                FileOutputStream(cachePdf).use { out -> pdfDoc.writeTo(out) }
+                pdfDoc.close()
+
+                runOnUiThread {
+                    isOperationRunning = false
+                    if (!isFinishing && !isDestroyed) {
+                        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", cachePdf)
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/pdf"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        startActivity(Intent.createChooser(intent, "Share HD PDF"))
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    isOperationRunning = false
+                    Toast.makeText(this, "PDF export error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
-            FileOutputStream(cachePdf).use { out -> pdfDoc.writeTo(out) }
-            pdfDoc.close()
-
-            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", cachePdf)
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(intent, "Share HD PDF"))
-        } catch (e: Exception) {
-            Toast.makeText(this, "PDF export error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -435,7 +478,7 @@ class DocumentViewerActivity : AppCompatActivity() {
             val pages = getSortedPageFiles()
             if (pages.isEmpty()) return
 
-            val uris = ArrayList<android.net.Uri>()
+            val uris = ArrayList<Uri>()
             for (f in pages) {
                 uris.add(FileProvider.getUriForFile(this, "${packageName}.fileprovider", f))
             }
@@ -467,14 +510,14 @@ class DocumentViewerActivity : AppCompatActivity() {
                 if (!dir.exists()) dir.mkdirs()
                 FileOutputStream(File(dir, imgName)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
             }
+            bmp.recycle()
             Toast.makeText(this, "Saved to Gallery!", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Save error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // Pinch-to-Zoom ImageView
-    private class PinchZoomImageView(context: Context) : androidx.appcompat.widget.AppCompatImageView(context) {
+    private class PinchZoomImageView(context: Context) : AppCompatImageView(context) {
         private val matrixZoom = Matrix()
         private var currentScale = 1f
         private var lastX = 0f
@@ -498,7 +541,8 @@ class DocumentViewerActivity : AppCompatActivity() {
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
             val d = drawable ?: return
-            val scale = kotlin.math.min(w.toFloat() / d.intrinsicWidth, h.toFloat() / d.intrinsicHeight)
+            if (d.intrinsicWidth <= 0 || d.intrinsicHeight <= 0) return
+            val scale = min(w.toFloat() / d.intrinsicWidth.toFloat(), h.toFloat() / d.intrinsicHeight.toFloat())
             val dx = (w - d.intrinsicWidth * scale) / 2f
             val dy = (h - d.intrinsicHeight * scale) / 2f
             matrixZoom.reset()
