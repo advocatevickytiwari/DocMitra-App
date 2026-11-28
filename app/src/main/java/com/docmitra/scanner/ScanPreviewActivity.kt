@@ -50,6 +50,7 @@ class ScanPreviewActivity : AppCompatActivity() {
     private lateinit var seekBrightness: SeekBar
     private lateinit var seekContrast: SeekBar
     private lateinit var stampControlsBar: LinearLayout
+    private lateinit var tvLoadingBanner: TextView
 
     private val originalBitmaps = ArrayList<Bitmap>()
     private val editedBitmaps = ArrayList<Bitmap>()
@@ -68,7 +69,6 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         val secureBaseDir = getSecureProjectsRoot()
 
-        // Path Traversal Guard
         val rawFolderPath = intent.getStringExtra("TARGET_PROJECT_DIR")
         if (!rawFolderPath.isNullOrBlank()) {
             try {
@@ -179,8 +179,22 @@ class ScanPreviewActivity : AppCompatActivity() {
             )
         }
 
+        tvLoadingBanner = TextView(this).apply {
+            text = "Preparing HD Document..."
+            textSize = 15f
+            setTextColor(0xFFFFFFFF.toInt())
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setBackgroundColor(0xCC0F172A.toInt())
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+
         stageFrame.addView(ivPreview)
         stageFrame.addView(overlayView)
+        stageFrame.addView(tvLoadingBanner)
         root.addView(stageFrame)
 
         stampControlsBar = LinearLayout(this).apply {
@@ -380,39 +394,59 @@ class ScanPreviewActivity : AppCompatActivity() {
             }
         }
 
-        for (uriStr in uriStrings.take(30)) {
-            try {
-                val parsedUri = Uri.parse(uriStr)
-                if (parsedUri.scheme != "content") continue
-
-                val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                contentResolver.openInputStream(parsedUri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream, null, boundsOpts)
-                }
-                var sampleSize = 1
-                while (boundsOpts.outWidth / sampleSize > 2000 || boundsOpts.outHeight / sampleSize > 2000) {
-                    sampleSize *= 2
-                }
-
-                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-                contentResolver.openInputStream(parsedUri)?.use { stream ->
-                    val bmp = BitmapFactory.decodeStream(stream, null, decodeOpts)
-                    if (bmp != null) {
-                        originalBitmaps.add(bmp)
-                        editedBitmaps.add(applyFastHardwareFilter(bmp, 58, 68, 1))
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-
-        if (originalBitmaps.isEmpty()) {
+        if (uriStrings.isEmpty()) {
             Toast.makeText(this, "No valid image found", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
 
-        updatePageDisplay()
+        // Decode and enhance images in background thread so UI never freezes or turns black
+        Thread {
+            val loadedOrig = ArrayList<Bitmap>()
+            val loadedEdit = ArrayList<Bitmap>()
+
+            for (uriStr in uriStrings.take(30)) {
+                try {
+                    val parsedUri = Uri.parse(uriStr)
+                    if (parsedUri.scheme != "content") continue
+
+                    val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    contentResolver.openInputStream(parsedUri)?.use { stream ->
+                        BitmapFactory.decodeStream(stream, null, boundsOpts)
+                    }
+                    var sampleSize = 1
+                    while (boundsOpts.outWidth / sampleSize > 1600 || boundsOpts.outHeight / sampleSize > 1600) {
+                        sampleSize *= 2
+                    }
+
+                    val decodeOpts = BitmapFactory.Options().apply {
+                        inSampleSize = sampleSize
+                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                    }
+                    contentResolver.openInputStream(parsedUri)?.use { stream ->
+                        val bmp = BitmapFactory.decodeStream(stream, null, decodeOpts)
+                        if (bmp != null) {
+                            loadedOrig.add(bmp)
+                            loadedEdit.add(applyFastHardwareFilter(bmp, 58, 68, 1))
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                tvLoadingBanner.visibility = View.GONE
+                if (loadedOrig.isEmpty()) {
+                    Toast.makeText(this, "Could not load scanned photo, try again", Toast.LENGTH_SHORT).show()
+                    finish()
+                } else {
+                    originalBitmaps.addAll(loadedOrig)
+                    editedBitmaps.addAll(loadedEdit)
+                    updatePageDisplay()
+                }
+            }
+        }.start()
 
         btnPrevPage.setOnClickListener {
             if (currentIndex > 0) {
@@ -429,6 +463,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         btnFilterOriginal.setOnClickListener {
+            if (editedBitmaps.isEmpty()) return@setOnClickListener
             currentFilterMode = 0
             seekBrightness.progress = 50
             seekContrast.progress = 50
@@ -436,6 +471,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         btnFilterMagic.setOnClickListener {
+            if (editedBitmaps.isEmpty()) return@setOnClickListener
             currentFilterMode = 1
             seekBrightness.progress = 58
             seekContrast.progress = 68
@@ -443,6 +479,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         btnFilterClear.setOnClickListener {
+            if (editedBitmaps.isEmpty()) return@setOnClickListener
             currentFilterMode = 2
             seekBrightness.progress = 62
             seekContrast.progress = 78
@@ -450,6 +487,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         btnFilterBw.setOnClickListener {
+            if (editedBitmaps.isEmpty()) return@setOnClickListener
             currentFilterMode = 3
             seekBrightness.progress = 65
             seekContrast.progress = 92
@@ -458,7 +496,7 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         val sliderListener = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) applyCurrentAdjustments()
+                if (fromUser && editedBitmaps.isNotEmpty()) applyCurrentAdjustments()
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -467,11 +505,11 @@ class ScanPreviewActivity : AppCompatActivity() {
         seekContrast.setOnSeekBarChangeListener(sliderListener)
 
         btnDoneSave.setOnClickListener {
-            saveProjectFolderAndFinish(shareImmediately = false)
+            if (editedBitmaps.isNotEmpty()) saveProjectFolderAndFinish(shareImmediately = false)
         }
 
         btnSaveAndShare.setOnClickListener {
-            saveProjectFolderAndFinish(shareImmediately = true)
+            if (editedBitmaps.isNotEmpty()) saveProjectFolderAndFinish(shareImmediately = true)
         }
     }
 
@@ -496,11 +534,13 @@ class ScanPreviewActivity : AppCompatActivity() {
     }
 
     private fun updatePageDisplay() {
+        if (editedBitmaps.isEmpty()) return
         ivPreview.setImageBitmap(editedBitmaps[currentIndex])
         tvPageIndicator.text = "${currentIndex + 1}/${editedBitmaps.size}"
     }
 
     private fun applyCurrentAdjustments() {
+        if (originalBitmaps.isEmpty()) return
         val base = originalBitmaps[currentIndex]
         editedBitmaps[currentIndex] = applyFastHardwareFilter(
             base,
