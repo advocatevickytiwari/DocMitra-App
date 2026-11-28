@@ -52,13 +52,16 @@ class PhotoStudioActivity : AppCompatActivity() {
 
     private var mode = "STAMP_SIGN"
     private var baseBitmap: Bitmap? = null
+    private var originalSizeKb: Int = 0
+    private var compressedBytes: ByteArray? = null
     private var tempCamFile: File? = null
 
     private lateinit var ivTargetDoc: ImageView
     private lateinit var stampOverlay: MovableStampView
     private lateinit var stampSizeBar: LinearLayout
     private lateinit var etDocName: EditText
-    private lateinit var tvCompressStatus: TextView
+    private var tvCompressStatus: TextView? = null
+    private var sbQualityRef: SeekBar? = null
 
     private val cameraPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -72,9 +75,13 @@ class PhotoStudioActivity : AppCompatActivity() {
     ) { ok ->
         val f = tempCamFile
         if (ok && f != null && f.exists() && f.length() > 0) {
+            val origKb = (f.length() / 1024L).toInt().coerceAtLeast(1)
             val bmp = decodeScaledFile(f, 1800)
             f.delete()
-            if (bmp != null) setLoadedBitmap(bmp)
+            if (bmp != null) {
+                originalSizeKb = origKb
+                setLoadedBitmap(bmp)
+            }
         }
     }
 
@@ -82,7 +89,12 @@ class PhotoStudioActivity : AppCompatActivity() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null && uri.scheme == "content") {
-            decodeScaledUri(uri, 1800)?.let { setLoadedBitmap(it) }
+            val origBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            val origKb = ((origBytes?.size ?: 0) / 1024).coerceAtLeast(1)
+            decodeScaledUri(uri, 1800)?.let {
+                originalSizeKb = origKb
+                setLoadedBitmap(it)
+            }
         }
     }
 
@@ -152,17 +164,8 @@ class PhotoStudioActivity : AppCompatActivity() {
             }
         }
 
-        val btnPickDoc = MaterialButton(this).apply {
-            text = "+ Open File"
-            textSize = 12f
-            isAllCaps = false
-            maxLines = 1
-            insetTop = 0
-            insetBottom = 0
-            setPadding(dp(12), 0, dp(12), 0)
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFFEA580C.toInt())
+        val btnPickDoc = makeCleanButton("+ Select File", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(104), dp(38))
             setOnClickListener { showDocumentSourceDialog() }
         }
 
@@ -204,6 +207,8 @@ class PhotoStudioActivity : AppCompatActivity() {
         }
     }
 
+    // ==================== 1. SIGNATURE & CUSTOM STAMP STUDIO ====================
+
     private fun buildStampAndSignStudioUi(root: LinearLayout, dp: (Int) -> Int) {
         val stageFrame = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -233,7 +238,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         stageFrame.addView(stampOverlay)
         root.addView(stageFrame)
 
-        // Stamp Scale & Fix Bar (Zero Clipping)
         stampSizeBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -271,7 +275,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         stampSizeBar.addView(btnFixOnPaper)
         root.addView(stampSizeBar)
 
-        // Bottom Studio Controls (Wide, non-clipped buttons)
         val bottomPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -335,6 +338,214 @@ class PhotoStudioActivity : AppCompatActivity() {
         }
         setLoadedBitmap(blankSheet)
     }
+
+    // ==================== 2. PHOTO & IMAGE COMPRESS (KB) STUDIO ====================
+
+    private fun buildCompressModeUi(root: LinearLayout, dp: (Int) -> Int) {
+        val scroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(20))
+        }
+
+        val btnSelectBig = makeCleanButton("📷  Select Photo (Camera / Gallery)", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 13.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)).apply {
+                bottomMargin = dp(10)
+            }
+            setOnClickListener { showDocumentSourceDialog() }
+        }
+        body.addView(btnSelectBig)
+
+        ivTargetDoc = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(230)).apply {
+                bottomMargin = dp(10)
+            }
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(0xFFFFFFFF.toInt())
+            setImageResource(android.R.drawable.ic_menu_gallery)
+        }
+        body.addView(ivTargetDoc)
+
+        val statusTv = TextView(this).apply {
+            text = "Step 1: Select a photo above to compress"
+            textSize = 13.5f
+            setTextColor(0xFF14532D.toInt())
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setBackgroundColor(0xFFDCFCE7.toInt())
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(10)
+            }
+        }
+        tvCompressStatus = statusTv
+        body.addView(statusTv)
+
+        // Quick 1-Tap Target Size Buttons (20KB, 50KB, 100KB, 200KB)
+        val presetRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(10)
+            }
+        }
+
+        val targets = listOf(20, 50, 100, 200)
+        targets.forEachIndexed { idx, targetKb ->
+            val b = makeCleanButton("${targetKb} KB", 0xFF334155.toInt(), 0xFFFFFFFF.toInt(), 11.5f, dp).apply {
+                layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f).apply {
+                    if (idx < targets.lastIndex) marginEnd = dp(5)
+                }
+                setOnClickListener { compressToExactTargetKb(targetKb) }
+            }
+            presetRow.addView(b)
+        }
+        body.addView(presetRow)
+
+        val sliderLabel = TextView(this).apply {
+            text = "Manual Quality Slider (Drag Left for Smaller KB):"
+            textSize = 12f
+            setTextColor(0xFF475569.toInt())
+            setPadding(0, 0, 0, dp(4))
+        }
+        body.addView(sliderLabel)
+
+        val sbQuality = SeekBar(this).apply {
+            max = 95
+            progress = 55
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(14)
+            }
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (baseBitmap != null) {
+                        recalculateCompressedPreview(progress.coerceIn(10, 95))
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        sbQualityRef = sbQuality
+        body.addView(sbQuality)
+
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        val btnSaveCompressed = makeCleanButton("✓ Save Photo", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(8) }
+            setOnClickListener {
+                val bytes = compressedBytes
+                if (bytes == null || baseBitmap == null) {
+                    Toast.makeText(this@PhotoStudioActivity, "Please select a photo first", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                val kb = (bytes.size / 1024).coerceAtLeast(1)
+                val name = "${sanitizeSimple(etDocName.text.toString(), "Compressed")}_${kb}KB.jpg"
+                saveRawJpegBytesToGallery(bytes, name)
+                Toast.makeText(this@PhotoStudioActivity, "Saved ($kb KB) to Gallery!", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        val btnShareCompressed = makeCleanButton("Share Photo", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
+            setOnClickListener {
+                val bytes = compressedBytes
+                if (bytes == null || baseBitmap == null) {
+                    Toast.makeText(this@PhotoStudioActivity, "Please select a photo first", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                val kb = (bytes.size / 1024).coerceAtLeast(1)
+                val name = "${sanitizeSimple(etDocName.text.toString(), "Compressed")}_${kb}KB.jpg"
+                val cacheImg = File(cacheDir, name)
+                FileOutputStream(cacheImg).use { it.write(bytes) }
+                val uri = FileProvider.getUriForFile(this@PhotoStudioActivity, "${packageName}.fileprovider", cacheImg)
+                val share = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/jpeg"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(share, "Share Compressed Image"))
+            }
+        }
+
+        actionRow.addView(btnSaveCompressed)
+        actionRow.addView(btnShareCompressed)
+        body.addView(actionRow)
+
+        scroll.addView(body)
+        root.addView(scroll)
+    }
+
+    private fun recalculateCompressedPreview(quality: Int) {
+        val bmp = baseBitmap ?: return
+        val baos = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.JPEG, quality, baos)
+        val bytes = baos.toByteArray()
+        compressedBytes = bytes
+        val newKb = (bytes.size / 1024).coerceAtLeast(1)
+        tvCompressStatus?.text = "Original: ${originalSizeKb} KB  →  New Size: ${newKb} KB (Quality $quality%)"
+    }
+
+    private fun compressToExactTargetKb(targetKb: Int) {
+        val bmp = baseBitmap ?: run {
+            Toast.makeText(this, "Please select a photo first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        var working = bmp
+        var bestBytes: ByteArray? = null
+        var bestQuality = 50
+
+        // Try quality steps first, then downscale if image resolution is huge
+        for (scaleStep in 0..3) {
+            for (q in 90 downTo 15 step 5) {
+                val baos = ByteArrayOutputStream()
+                working.compress(Bitmap.CompressFormat.JPEG, q, baos)
+                val arr = baos.toByteArray()
+                bestBytes = arr
+                bestQuality = q
+                if (arr.size / 1024 <= targetKb) {
+                    compressedBytes = arr
+                    sbQualityRef?.progress = bestQuality
+                    val finalKb = (arr.size / 1024).coerceAtLeast(1)
+                    tvCompressStatus?.text = "Original: ${originalSizeKb} KB  →  New Size: ${finalKb} KB (Target ≤ ${targetKb} KB)"
+                    ivTargetDoc.setImageBitmap(BitmapFactory.decodeByteArray(arr, 0, arr.size))
+                    return
+                }
+            }
+            val nextW = (working.width * 0.72f).toInt().coerceAtLeast(240)
+            val nextH = (working.height * 0.72f).toInt().coerceAtLeast(240)
+            working = Bitmap.createScaledBitmap(working, nextW, nextH, true)
+        }
+
+        bestBytes?.let { arr ->
+            compressedBytes = arr
+            val finalKb = (arr.size / 1024).coerceAtLeast(1)
+            tvCompressStatus?.text = "Original: ${originalSizeKb} KB  →  New Size: ${finalKb} KB"
+        }
+    }
+
+    private fun saveRawJpegBytesToGallery(bytes: ByteArray, fileName: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocMitra")
+                }
+                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                uri?.let { contentResolver.openOutputStream(it)?.use { out -> out.write(bytes) } }
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
+                if (!dir.exists()) dir.mkdirs()
+                FileOutputStream(File(dir, fileName)).use { out -> out.write(bytes) }
+            }
+        } catch (_: Exception) {}
+    }
+
+    // ==================== SHARED DIALOGS & HELPERS ====================
 
     private fun showCleanOptionSheet(title: String, options: List<String>, onSelect: (Int) -> Unit) {
         val density = resources.displayMetrics.density
@@ -429,6 +640,10 @@ class PhotoStudioActivity : AppCompatActivity() {
     private fun setLoadedBitmap(bmp: Bitmap) {
         baseBitmap = bmp
         ivTargetDoc.setImageBitmap(bmp)
+        if (mode == "COMPRESS") {
+            val q = sbQualityRef?.progress?.coerceIn(10, 95) ?: 55
+            recalculateCompressedPreview(q)
+        }
     }
 
     private fun getStampsDir(): File {
@@ -643,12 +858,10 @@ class PhotoStudioActivity : AppCompatActivity() {
         val finalBmp = baseBitmap ?: return
 
         try {
-            val cleanName = etDocName.text.toString().trim()
-                .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "")
-                .replace("..", "")
-                .trim()
-                .take(50)
-                .ifEmpty { "Signed_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}" }
+            val cleanName = sanitizeSimple(
+                etDocName.text.toString(),
+                "Signed_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
+            )
 
             val projDir = File(filesDir, "DocMitra/Projects/$cleanName")
             if (!projDir.exists()) projDir.mkdirs()
@@ -684,59 +897,13 @@ class PhotoStudioActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildCompressModeUi(root: LinearLayout, dp: (Int) -> Int) {
-        val scroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
-        }
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(14), dp(14), dp(20))
-        }
-
-        ivTargetDoc = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(280)).apply {
-                bottomMargin = dp(10)
-            }
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setBackgroundColor(0xFFFFFFFF.toInt())
-        }
-        body.addView(ivTargetDoc)
-
-        tvCompressStatus = TextView(this).apply {
-            text = "Tap '+ Open File' at top to select photo"
-            textSize = 13f
-            setTextColor(0xFF14532D.toInt())
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 0, 0, dp(8))
-        }
-        body.addView(tvCompressStatus)
-
-        val sbQuality = SeekBar(this).apply {
-            max = 95
-            progress = 60
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dp(12)
-            }
-        }
-        body.addView(sbQuality)
-
-        val btnSaveCompressed = makeCleanButton("Save Compressed Photo to Gallery", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 14f, dp).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
-            setOnClickListener {
-                val bmp = baseBitmap ?: return@setOnClickListener
-                val q = sbQuality.progress.coerceIn(15, 95)
-                val baos = ByteArrayOutputStream()
-                bmp.compress(Bitmap.CompressFormat.JPEG, q, baos)
-                val kb = baos.size() / 1024
-                val name = "${etDocName.text.toString().trim().ifEmpty { "Compressed" }}_${kb}KB.jpg"
-                val compressedBmp = BitmapFactory.decodeByteArray(baos.toByteArray(), 0, baos.size())
-                saveToGallery(compressedBmp, name)
-                Toast.makeText(this@PhotoStudioActivity, "Saved ($kb KB) to Gallery!", Toast.LENGTH_LONG).show()
-            }
-        }
-        body.addView(btnSaveCompressed)
-        scroll.addView(body)
-        root.addView(scroll)
+    private fun sanitizeSimple(raw: String, fallback: String): String {
+        return raw.trim()
+            .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "")
+            .replace("..", "")
+            .trim()
+            .take(50)
+            .ifEmpty { fallback }
     }
 
     private fun createBoxStamp(title: String, sub: String, ink: Int): Bitmap {
@@ -798,4 +965,165 @@ class PhotoStudioActivity : AppCompatActivity() {
         val botSize = if (botTxt.length > 18) 19f else 23f
         val pArcBot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ink
-            text
+            textSize = botSize
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val botArc = Path().apply { addArc(RectF(cx - 152f, cy - 152f, cx + 152f, cy + 152f), 165f, -150f) }
+        c.drawTextOnPath(botTxt.uppercase(Locale.getDefault()), botArc, 0f, 0f, pArcBot)
+
+        val midSize = if (midTxt.length > 12) 22f else 26f
+        val pMid = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ink
+            textSize = midSize
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        c.drawText("★ $midTxt ★", cx, cy + 9f, pMid)
+        return bmp
+    }
+
+    private fun decodeScaledFile(file: File, maxDim: Int): Bitmap? {
+        return try {
+            val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, b)
+            var s = 1
+            while (b.outWidth / s > maxDim || b.outHeight / s > maxDim) s *= 2
+            BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = s })
+        } catch (_: Exception) { null }
+    }
+
+    private fun decodeScaledUri(uri: Uri, maxDim: Int): Bitmap? {
+        return try {
+            val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, b) }
+            var s = 1
+            while (b.outWidth / s > maxDim || b.outHeight / s > maxDim) s *= 2
+            contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
+            }
+        } catch (_: Exception) { null }
+    }
+
+    private fun saveToGallery(bmp: Bitmap, name: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocMitra")
+                }
+                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) } }
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
+                if (!dir.exists()) dir.mkdirs()
+                FileOutputStream(File(dir, name)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private class MovableStampView(context: Context) : View(context) {
+        var currentStamp: Bitmap? = null
+        var posX = 120f
+        var posY = 260f
+        var scaleVal = 0.65f
+        private var lastX = 0f
+        private var lastY = 0f
+        private var dragging = false
+        private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFEA580C.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
+        }
+
+        fun applyStamp(bmp: Bitmap) {
+            currentStamp = bmp
+            val vw = if (width > 0) width.toFloat() else 800f
+            val vh = if (height > 0) height.toFloat() else 1000f
+            scaleVal = (vw * 0.42f / bmp.width.coerceAtLeast(1)).coerceIn(0.25f, 1.2f)
+            posX = (vw - bmp.width * scaleVal) / 2f
+            posY = (vh - bmp.height * scaleVal) / 2f
+            invalidate()
+        }
+
+        fun changeScale(delta: Float) {
+            scaleVal = (scaleVal + delta).coerceIn(0.2f, 2.0f)
+            invalidate()
+        }
+
+        fun clear() {
+            currentStamp = null
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val bmp = currentStamp ?: return
+            val dest = RectF(posX, posY, posX + bmp.width * scaleVal, posY + bmp.height * scaleVal)
+            canvas.drawBitmap(bmp, null, dest, null)
+            canvas.drawRect(dest, boxPaint)
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            val bmp = currentStamp ?: return false
+            val w = bmp.width * scaleVal
+            val h = bmp.height * scaleVal
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (event.x >= posX - 30f && event.x <= posX + w + 30f &&
+                        event.y >= posY - 30f && event.y <= posY + h + 30f) {
+                        dragging = true
+                        lastX = event.x
+                        lastY = event.y
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (dragging) {
+                        posX += event.x - lastX
+                        posY += event.y - lastY
+                        lastX = event.x
+                        lastY = event.y
+                        invalidate()
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = false
+            }
+            return false
+        }
+    }
+
+    private class FingerSignPad(context: Context) : View(context) {
+        private val signPath = Path()
+        private var drawn = false
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(15, 45, 150)
+            style = Paint.Style.STROKE
+            strokeWidth = 9f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        init { setBackgroundColor(0xFFF8FAFC.toInt()) }
+        fun clearPad() {
+            signPath.reset()
+            drawn = false
+            invalidate()
+        }
+        override fun onDraw(canvas: Canvas) { super.onDraw(canvas); canvas.drawPath(signPath, paint) }
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> { signPath.moveTo(event.x, event.y); drawn = true; invalidate(); return true }
+                MotionEvent.ACTION_MOVE -> { signPath.lineTo(event.x, event.y); invalidate(); return true }
+            }
+            return true
+        }
+        fun exportSignBitmap(): Bitmap? {
+            if (!drawn || width <= 0 || height <= 0) return null
+            val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            Canvas(bmp).drawPath(signPath, paint)
+            return bmp
+        }
+    }
+}
