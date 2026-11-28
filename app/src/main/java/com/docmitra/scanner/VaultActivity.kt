@@ -1,197 +1,327 @@
 package com.docmitra.scanner
 
-import android.app.Activity
-import android.app.KeyguardManager
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class VaultActivity : AppCompatActivity() {
 
-    private lateinit var vaultContainer: LinearLayout
+    private lateinit var vaultListContainer: LinearLayout
+    private lateinit var tvVaultStatus: TextView
     private var isUnlocked = false
 
-    private val authLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            isUnlocked = true
-            renderVaultUi()
-        } else {
-            Toast.makeText(this, "Authentication required to open ID Vault", Toast.LENGTH_SHORT).show()
-            finish()
-        }
-    }
-
-    private val addDocLauncher = registerForActivityResult(
+    private val addVaultDocLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { saveToPrivateVault(it) }
+        if (uri != null && uri.scheme == "content") {
+            saveUriToPrivateVault(uri)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Block screenshots & screen recording for maximum security
-        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+
+        val density = resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF0F172A.toInt())
-            setPadding(40, 60, 40, 40)
         }
 
-        val header = TextView(this).apply {
-            text = "🔒 DocMitra Private ID Vault"
-            setTextColor(0xFFF8FAFC.toInt())
-            textSize = 20f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-        }
-
-        val sub = TextView(this).apply {
-            text = "Screenshot Blocked • Offline Encrypted Storage"
-            setTextColor(0xFF34D399.toInt())
-            textSize = 12f
-            setPadding(0, 8, 0, 28)
-        }
-
-        val addBtn = MaterialButton(this).apply {
-            text = "+ Add ID / Document to Vault"
-            setBackgroundColor(0xFF059669.toInt())
-            setTextColor(0xFFFFFFFF.toInt())
-            setOnClickListener {
-                if (isUnlocked) addDocLauncher.launch("image/*")
-            }
-        }
-
-        vaultContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 30, 0, 0)
-        }
-
-        root.addView(header)
-        root.addView(sub)
-        root.addView(addBtn)
-        root.addView(vaultContainer)
-        setContentView(root)
-
-        authenticateUser()
-    }
-
-    private fun authenticateUser() {
-        val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-        if (km.isKeyguardSecure) {
-            val intent = km.createConfirmDeviceCredentialIntent(
-                "DocMitra ID Vault",
-                "Verify Fingerprint or Screen Lock to unlock your private IDs"
+        // Hardware-level Safe Area Insets
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            if (intent != null) {
-                authLauncher.launch(intent)
-                return
-            }
+            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            WindowInsetsCompat.CONSUMED
         }
-        // Fallback if device has no screen lock set
-        isUnlocked = true
-        renderVaultUi()
-    }
 
-    private fun saveToPrivateVault(uri: Uri) {
-        try {
-            val vaultDir = File(filesDir, "private_vault")
-            if (!vaultDir.exists()) vaultDir.mkdirs()
-            val outFile = File(vaultDir, "ID_${System.currentTimeMillis()}.jpg")
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(outFile).use { output ->
-                    input.copyTo(output)
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF14532D.toInt())
+            setPadding(dp(10), dp(10), dp(12), dp(10))
+        }
+
+        val btnBack = MaterialButton(this).apply {
+            text = "←"
+            textSize = 16f
+            minWidth = dp(40)
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0x00000000)
+            setOnClickListener { finish() }
+        }
+
+        val tvTitle = TextView(this).apply {
+            text = "🔒 DocMitra Private ID Vault"
+            textSize = 16f
+            setTextColor(0xFFFFFFFF.toInt())
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        topBar.addView(btnBack)
+        topBar.addView(tvTitle)
+        root.addView(topBar)
+
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(16))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        }
+
+        tvVaultStatus = TextView(this).apply {
+            text = "Screenshot Blocked • Offline Encrypted Storage"
+            textSize = 12f
+            setTextColor(0xFF4ADE80.toInt())
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(10))
+        }
+        body.addView(tvVaultStatus)
+
+        val btnAddVault = MaterialButton(this).apply {
+            text = "+ Add ID / Document to Vault"
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(0xFF0F172A.toInt())
+            setBackgroundColor(0xFF4ADE80.toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(48)
+            ).apply { bottomMargin = dp(12) }
+            setOnClickListener {
+                if (isUnlocked) {
+                    addVaultDocLauncher.launch("image/*")
+                } else {
+                    promptBiometricUnlock()
                 }
             }
-            Toast.makeText(this, "ID securely locked in Vault!", Toast.LENGTH_SHORT).show()
-            renderVaultUi()
+        }
+        body.addView(btnAddVault)
+
+        val scroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        }
+
+        vaultListContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        scroll.addView(vaultListContainer)
+        body.addView(scroll)
+        root.addView(body)
+
+        setContentView(root)
+        promptBiometricUnlock()
+    }
+
+    private fun getPrivateVaultDir(): File {
+        val dir = File(filesDir, "DocMitra/PrivateVault")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    private fun promptBiometricUnlock() {
+        val biometricManager = BiometricManager.from(this)
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+
+        if (biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
+            isUnlocked = true
+            refreshVaultItems()
+            return
+        }
+
+        val executor = ContextCompat.getMainExecutor(this)
+        val biometricPrompt = BiometricPrompt(
+            this,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    isUnlocked = true
+                    refreshVaultItems()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    Toast.makeText(this@VaultActivity, "Authentication required to open ID Vault", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+            }
+        )
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Unlock DocMitra Private Vault")
+            .setSubtitle("Verify Fingerprint or Screen Lock to view private IDs")
+            .setAllowedAuthenticators(authenticators)
+            .build()
+
+        biometricPrompt.authenticate(promptInfo)
+    }
+
+    private fun saveUriToPrivateVault(uri: Uri) {
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val bmp = BitmapFactory.decodeStream(input)
+                if (bmp != null) {
+                    val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                    val outFile = File(getPrivateVaultDir(), "Vault_ID_$stamp.jpg")
+                    FileOutputStream(outFile).use { out ->
+                        bmp.compress(Bitmap.CompressFormat.JPEG, 94, out)
+                    }
+                    bmp.recycle()
+                    Toast.makeText(this, "Saved securely in Private Vault!", Toast.LENGTH_SHORT).show()
+                    refreshVaultItems()
+                }
+            }
         } catch (e: Exception) {
-            Toast.makeText(this, "Failed to save in vault", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Vault save error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun renderVaultUi() {
-        vaultContainer.removeAllViews()
-        val vaultDir = File(filesDir, "private_vault")
-        val files = vaultDir.listFiles()?.sortedByDescending { it.lastModified() }
+    private fun refreshVaultItems() {
+        vaultListContainer.removeAllViews()
+        if (!isUnlocked) return
 
-        if (files.isNullOrEmpty()) {
-            val empty = TextView(this).apply {
+        val files = getPrivateVaultDir().listFiles { f ->
+            f.isFile && f.extension.equals("jpg", ignoreCase = true)
+        }?.sortedByDescending { it.lastModified() } ?: emptyList()
+
+        if (files.isEmpty()) {
+            val emptyTv = TextView(this).apply {
                 text = "Your Vault is empty. Tap '+ Add ID' above to store Aadhaar, PAN, or Bar Council ID safely."
                 setTextColor(0xFF94A3B8.toInt())
-                textSize = 13f
+                textSize = 13.5f
+                setPadding(12, 32, 12, 12)
             }
-            vaultContainer.addView(empty)
+            vaultListContainer.addView(emptyTv)
             return
         }
+
+        val density = resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
 
         for (file in files) {
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { bottomMargin = 16 }
+                ).apply { bottomMargin = dp(10) }
+                radius = 12f * density
                 setCardBackgroundColor(0xFF1E293B.toInt())
-                radius = 24f
             }
 
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(30, 24, 30, 24)
+                setPadding(dp(10), dp(10), dp(10), dp(10))
             }
 
-            val title = TextView(this).apply {
-                text = "Protected ID (${file.name.takeLast(10)})"
-                setTextColor(0xFFF8FAFC.toInt())
+            val iv = ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(54), dp(54))
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setImageBitmap(BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = 4 }))
+            }
+
+            val tvName = TextView(this).apply {
+                text = file.nameWithoutExtension
                 textSize = 14f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-
-            val viewBtn = MaterialButton(this).apply {
-                text = "View"
-                setBackgroundColor(0xFF2563EB.toInt())
                 setTextColor(0xFFFFFFFF.toInt())
-                setOnClickListener { showSecureImageDialog(file) }
+                setTypeface(null, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(10)
+                }
             }
 
-            row.addView(title)
-            row.addView(viewBtn)
+            val btnShare = MaterialButton(this).apply {
+                text = "Share"
+                textSize = 11f
+                minWidth = 0
+                setTextColor(0xFFFFFFFF.toInt())
+                setBackgroundColor(0xFFEA580C.toInt())
+                setOnClickListener {
+                    val shareUri = FileProvider.getUriForFile(this@VaultActivity, "${packageName}.fileprovider", file)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/jpeg"
+                        putExtra(Intent.EXTRA_STREAM, shareUri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(intent, "Share Private ID"))
+                }
+            }
+
+            val btnDel = MaterialButton(this).apply {
+                text = "🗑"
+                textSize = 14f
+                minWidth = 0
+                setTextColor(0xFFFCA5A5.toInt())
+                setBackgroundColor(0x00000000)
+                setOnClickListener {
+                    file.delete()
+                    refreshVaultItems()
+                }
+            }
+
+            row.addView(iv)
+            row.addView(tvName)
+            row.addView(btnShare)
+            row.addView(btnDel)
             card.addView(row)
-            vaultContainer.addView(card)
-        }
-    }
 
-    private fun showSecureImageDialog(file: File) {
-        val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return
-        val iv = ImageView(this).apply {
-            setImageBitmap(bmp)
-            adjustViewBounds = true
-            setPadding(20, 20, 20, 20)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Protected Document")
-            .setView(iv)
-            .setPositiveButton("Close", null)
-            .setNegativeButton("Delete") { _, _ ->
-                file.delete()
-                renderVaultUi()
+            card.setOnClickListener {
+                val fullIv = ImageView(this).apply {
+                    setImageBitmap(BitmapFactory.decodeFile(file.absolutePath))
+                    adjustViewBounds = true
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(file.nameWithoutExtension)
+                    .setView(fullIv)
+                    .setNegativeButton("Close", null)
+                    .show()
             }
-            .show()
+
+            vaultListContainer.addView(card)
+        }
     }
 }
