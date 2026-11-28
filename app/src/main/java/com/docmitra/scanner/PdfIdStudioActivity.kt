@@ -21,6 +21,8 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
+import android.text.InputType
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -37,15 +39,16 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -66,6 +69,9 @@ class PdfIdStudioActivity : AppCompatActivity() {
 
     private val selectedImages = ArrayList<Bitmap>()
     private var selectedPdfUri: Uri? = null
+    private val mergePdfUris = ArrayList<Uri>()
+    private var tvPdfToolStatus: TextView? = null
+    private var pdfCompressLevel = 1 // 0 = Light (85%), 1 = Balanced (65%), 2 = Extreme (45%)
 
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -121,12 +127,24 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
-    private val pdfPicker = registerForActivityResult(
+    private val singlePdfPicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null && uri.scheme == "content") {
             selectedPdfUri = uri
-            Toast.makeText(this, "PDF selected! Ready to compress.", Toast.LENGTH_SHORT).show()
+            val info = inspectPdfPagesAndKb(uri)
+            tvPdfToolStatus?.text = "Selected PDF: ${info.first} Page(s) • Original Size: ${info.second} KB"
+            Toast.makeText(this, "PDF loaded (${info.first} pages)", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val multiPdfPicker = registerForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (!uris.isNullOrEmpty()) {
+            mergePdfUris.addAll(uris.filter { it.scheme == "content" })
+            tvPdfToolStatus?.text = "${mergePdfUris.size} PDF file(s) queued for merging"
+            Toast.makeText(this, "${mergePdfUris.size} PDFs selected", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -148,26 +166,21 @@ class PdfIdStudioActivity : AppCompatActivity() {
             setBackgroundColor(0xFFF1F5F9.toInt())
         }
 
-        // Hardware-level Safe Area Insets
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
-            val insets = windowInsets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
-            )
-            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
-            WindowInsetsCompat.CONSUMED
-        }
-
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF14532D.toInt())
-            setPadding(dp(10), dp(10), dp(12), dp(10))
+            setPadding(dp(8), dp(8), dp(12), dp(8))
         }
 
         val btnBack = MaterialButton(this).apply {
             text = "←"
-            textSize = 16f
+            textSize = 18f
             minWidth = dp(40)
+            minimumWidth = dp(40)
+            insetTop = 0
+            insetBottom = 0
+            setPadding(0, 0, 0, 0)
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0x00000000)
             setOnClickListener { finish() }
@@ -175,7 +188,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
 
         val titleText = when (mode) {
             "IMG_TO_PDF" -> "Image to PDF Maker"
-            "PDF_TOOLS" -> "PDF Compress & Lock"
+            "PDF_TOOLS" -> "PDF Compress, Merge & Lock"
             else -> "ID Card Front & Back Merger"
         }
 
@@ -201,12 +214,12 @@ class PdfIdStudioActivity : AppCompatActivity() {
 
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(20))
+            setPadding(dp(12), dp(12), dp(12), dp(24))
         }
 
         val defaultName = when (mode) {
             "IMG_TO_PDF" -> "PDF_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
-            "PDF_TOOLS" -> "Compressed_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
+            "PDF_TOOLS" -> "DocMitra_PDF_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
             else -> "ID_Card_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
         }
 
@@ -221,7 +234,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(12) }
+            ).apply { bottomMargin = dp(10) }
         }
         body.addView(etFileName)
 
@@ -238,6 +251,32 @@ class PdfIdStudioActivity : AppCompatActivity() {
         setContentView(root)
     }
 
+    private fun makeCleanButton(
+        label: String,
+        bgColor: Int,
+        txtColor: Int,
+        txtSize: Float,
+        dp: (Int) -> Int
+    ): MaterialButton {
+        return MaterialButton(this).apply {
+            text = label
+            textSize = txtSize
+            isAllCaps = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            minWidth = 0
+            minimumWidth = 0
+            insetTop = 0
+            insetBottom = 0
+            setPadding(dp(6), 0, dp(6), 0)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(txtColor)
+            setBackgroundColor(bgColor)
+        }
+    }
+
+    // ==================== 1. ID CARD FRONT & BACK MERGER (ZERO CLIPPING) ====================
+
     private fun buildIdMergerUi(body: LinearLayout, dp: (Int) -> Int, density: Float) {
         val sidesRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -249,7 +288,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
 
         fun createSideCard(label: String, sideNum: Int): Pair<MaterialCardView, ImageView> {
             val card = MaterialCardView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(0, dp(145), 1f).apply {
+                layoutParams = LinearLayout.LayoutParams(0, dp(140), 1f).apply {
                     if (sideNum == 1) marginEnd = dp(6) else marginStart = dp(6)
                 }
                 radius = 12f * density
@@ -268,6 +307,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
             val tvHeader = TextView(this).apply {
                 text = label
                 textSize = 12.5f
+                maxLines = 1
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(0xFF14532D.toInt())
                 gravity = Gravity.CENTER
@@ -288,6 +328,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
             val tvTapHint = TextView(this).apply {
                 text = "Tap to Add / Crop"
                 textSize = 11f
+                maxLines = 1
                 setTextColor(0xFFEA580C.toInt())
                 setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
@@ -323,24 +364,16 @@ class PdfIdStudioActivity : AppCompatActivity() {
             ).apply { bottomMargin = dp(8) }
         }
 
-        val btnTopBottom = MaterialButton(this).apply {
-            text = "Top & Bottom (A4)"
-            textSize = 11.5f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF14532D.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginEnd = dp(6) }
+        val btnTopBottom = makeCleanButton("Top & Bottom (A4)", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginEnd = dp(6) }
             setOnClickListener {
                 isSideBySide = false
                 refreshIdMergedPreview()
             }
         }
 
-        val btnSideBySide = MaterialButton(this).apply {
-            text = "Side by Side (A4)"
-            textSize = 11.5f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF475569.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f)
+        val btnSideBySide = makeCleanButton("Side by Side (A4)", 0xFF475569.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
             setOnClickListener {
                 isSideBySide = true
                 refreshIdMergedPreview()
@@ -354,7 +387,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
         ivMergedPreview = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(320)
+                dp(300)
             ).apply { bottomMargin = dp(10) }
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -370,22 +403,12 @@ class PdfIdStudioActivity : AppCompatActivity() {
             )
         }
 
-        val btnSaveGalleryAndApp = MaterialButton(this).apply {
-            text = "✓ Save Photo (Gallery)"
-            textSize = 12.5f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF14532D.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(6) }
+        val btnSaveGalleryAndApp = makeCleanButton("✓ Save Photo", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(8) }
             setOnClickListener { saveMergedIdCard(sharePdfAfter = false) }
         }
 
-        val btnSharePdf = MaterialButton(this).apply {
-            text = "Share PDF"
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFFEA580C.toInt())
+        val btnSharePdf = makeCleanButton("Share PDF", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
             layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f)
             setOnClickListener { saveMergedIdCard(sharePdfAfter = true) }
         }
@@ -398,26 +421,50 @@ class PdfIdStudioActivity : AppCompatActivity() {
     }
 
     private fun showIdSideSourcePopup() {
+        val density = resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
         val existing = if (activeIdSide == 1) frontBitmap else backBitmap
-        val options = if (existing != null) {
-            arrayOf("📷 Take Photo with Camera", "🖼 Choose from Gallery", "✂️ Re-Crop Current Photo")
-        } else {
-            arrayOf("📷 Take Photo with Camera", "🖼 Choose from Gallery")
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
         }
 
-        AlertDialog.Builder(this)
-            .setTitle(if (activeIdSide == 1) "FRONT Side Options" else "BACK Side Options")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> {
-                        cameraRequestPurpose = "ID_CARD"
-                        checkCameraPermissionAndOpen()
+        var dlg: AlertDialog? = null
+        val items = if (existing != null) {
+            listOf("📷  Take Photo with Camera", "🖼  Choose from Gallery", "✂️  Re-Crop Current Photo")
+        } else {
+            listOf("📷  Take Photo with Camera", "🖼  Choose from Gallery")
+        }
+
+        items.forEachIndexed { idx, label ->
+            val b = makeCleanButton(label, 0xFFF1F5F9.toInt(), 0xFF0F172A.toInt(), 13.5f, dp).apply {
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(8)
+                }
+                setOnClickListener {
+                    dlg?.dismiss()
+                    when (idx) {
+                        0 -> {
+                            cameraRequestPurpose = "ID_CARD"
+                            checkCameraPermissionAndOpen()
+                        }
+                        1 -> singleGalleryPicker.launch("image/*")
+                        2 -> existing?.let { openInteractiveCropDialog(it) }
                     }
-                    1 -> singleGalleryPicker.launch("image/*")
-                    2 -> existing?.let { openInteractiveCropDialog(it) }
                 }
             }
-            .show()
+            container.addView(b)
+        }
+
+        dlg = AlertDialog.Builder(this)
+            .setTitle(if (activeIdSide == 1) "FRONT Side Options" else "BACK Side Options")
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dlg.show()
     }
 
     private fun checkCameraPermissionAndOpen() {
@@ -451,7 +498,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
 
         val hintTv = TextView(this).apply {
-            text = "Drag orange corners to crop ID card cleanly"
+            text = "Drag orange corners to crop ID card"
             textSize = 12f
             setTextColor(0xFFFFFFFF.toInt())
             gravity = Gravity.CENTER
@@ -461,7 +508,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
         val cropFrame = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(340)
+                dp(310)
             )
         }
 
@@ -474,15 +521,15 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
         cropFrame.addView(cropEditorView)
 
-        val btnRotateCrop = MaterialButton(this).apply {
-            text = "↻ Rotate 90°"
-            textSize = 12f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF334155.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(40)
-            ).apply { topMargin = dp(8) }
+        var cropDlg: AlertDialog? = null
+
+        val actionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+
+        val btnRotateCrop = makeCleanButton("↻ Rotate", 0xFF334155.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) }
             setOnClickListener {
                 val m = Matrix().apply { postRotate(90f) }
                 workingBmp = Bitmap.createBitmap(workingBmp, 0, 0, workingBmp.width, workingBmp.height, m, true)
@@ -490,15 +537,24 @@ class PdfIdStudioActivity : AppCompatActivity() {
             }
         }
 
-        dialogLayout.addView(hintTv)
-        dialogLayout.addView(cropFrame)
-        dialogLayout.addView(btnRotateCrop)
+        val btnUseFull = makeCleanButton("Full Photo", 0xFF475569.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) }
+            setOnClickListener {
+                if (activeIdSide == 1) {
+                    frontBitmap = workingBmp
+                    ivFrontPreview.setImageBitmap(workingBmp)
+                } else {
+                    backBitmap = workingBmp
+                    ivBackPreview.setImageBitmap(workingBmp)
+                }
+                refreshIdMergedPreview()
+                cropDlg?.dismiss()
+            }
+        }
 
-        AlertDialog.Builder(this)
-            .setTitle(if (activeIdSide == 1) "Crop FRONT Side" else "Crop BACK Side")
-            .setView(dialogLayout)
-            .setCancelable(false)
-            .setPositiveButton("✓ Crop & Use") { _, _ ->
+        val btnApplyCrop = makeCleanButton("✓ Apply Crop", 0xFF16A34A.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1.2f)
+            setOnClickListener {
                 val cropped = cropEditorView.extractCroppedBitmap()
                 if (activeIdSide == 1) {
                     frontBitmap = cropped
@@ -508,19 +564,24 @@ class PdfIdStudioActivity : AppCompatActivity() {
                     ivBackPreview.setImageBitmap(cropped)
                 }
                 refreshIdMergedPreview()
+                cropDlg?.dismiss()
             }
-            .setNeutralButton("Use Full") { _, _ ->
-                if (activeIdSide == 1) {
-                    frontBitmap = workingBmp
-                    ivFrontPreview.setImageBitmap(workingBmp)
-                } else {
-                    backBitmap = workingBmp
-                    ivBackPreview.setImageBitmap(workingBmp)
-                }
-                refreshIdMergedPreview()
-            }
+        }
+
+        actionBar.addView(btnRotateCrop)
+        actionBar.addView(btnUseFull)
+        actionBar.addView(btnApplyCrop)
+
+        dialogLayout.addView(hintTv)
+        dialogLayout.addView(cropFrame)
+        dialogLayout.addView(actionBar)
+
+        cropDlg = AlertDialog.Builder(this)
+            .setTitle(if (activeIdSide == 1) "Crop FRONT Side" else "Crop BACK Side")
+            .setView(dialogLayout)
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        cropDlg.show()
     }
 
     private fun drawBitmapFitInsideSlot(canvas: Canvas, bmp: Bitmap, slot: RectF, paint: Paint) {
@@ -666,12 +727,10 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
+    // ==================== 2. IMAGE TO PDF MAKER ====================
+
     private fun buildImageToPdfUi(body: LinearLayout, dp: (Int) -> Int) {
-        val btnAddPhotos = MaterialButton(this).apply {
-            text = "+ Add Photos (Camera / Gallery)"
-            textSize = 14f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFFEA580C.toInt())
+        val btnAddPhotos = makeCleanButton("+ Add Photos (Camera / Gallery)", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 13.5f, dp).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(48)
@@ -695,18 +754,14 @@ class PdfIdStudioActivity : AppCompatActivity() {
         ivMergedPreview = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(320)
+                dp(300)
             ).apply { bottomMargin = dp(12) }
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(0xFFFFFFFF.toInt())
         }
         body.addView(ivMergedPreview)
 
-        val btnCreate = MaterialButton(this).apply {
-            text = "Create & Share PDF"
-            textSize = 14f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF14532D.toInt())
+        val btnCreate = makeCleanButton("Create & Share HD PDF", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 14f, dp).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(48)
@@ -739,32 +794,142 @@ class PdfIdStudioActivity : AppCompatActivity() {
         body.addView(btnCreate)
     }
 
+    // ==================== 3. PDF COMPRESS, MERGE & LOCK SUITE ====================
+
     private fun buildPdfToolsUi(body: LinearLayout, dp: (Int) -> Int) {
-        val btnPickPdf = MaterialButton(this).apply {
-            text = "Select PDF File to Compress"
-            textSize = 14f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFFEA580C.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48)
-            ).apply { bottomMargin = dp(12) }
-            setOnClickListener { pdfPicker.launch("application/pdf") }
+        val statusBanner = TextView(this).apply {
+            text = "Choose an action below: Compress PDF, Merge PDFs, or Lock PDF"
+            textSize = 13f
+            setTextColor(0xFF14532D.toInt())
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setBackgroundColor(0xFFDCFCE7.toInt())
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(12)
+            }
+        }
+        tvPdfToolStatus = statusBanner
+        body.addView(statusBanner)
+
+        // Section A: PDF Compress
+        val secCompressTitle = TextView(this).apply {
+            text = "1. COMPRESS PDF SIZE"
+            textSize = 12.5f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(0xFF0F172A.toInt())
+            setPadding(0, 0, 0, dp(6))
+        }
+        body.addView(secCompressTitle)
+
+        val btnPickPdf = makeCleanButton("📄 Select PDF File", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)).apply {
+                bottomMargin = dp(8)
+            }
+            setOnClickListener { singlePdfPicker.launch("application/pdf") }
         }
         body.addView(btnPickPdf)
 
-        val btnCompress = MaterialButton(this).apply {
-            text = "Compress & Share PDF"
-            textSize = 14f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF14532D.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48)
-            )
+        val levelRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(8)
+            }
+        }
+
+        val btnLow = makeCleanButton("Light (HD)", 0xFF475569.toInt(), 0xFFFFFFFF.toInt(), 11.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginEnd = dp(5) }
+            setOnClickListener {
+                pdfCompressLevel = 0
+                Toast.makeText(this@PdfIdStudioActivity, "Compression: Light (High Quality)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        val btnMed = makeCleanButton("Medium", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 11.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginEnd = dp(5) }
+            setOnClickListener {
+                pdfCompressLevel = 1
+                Toast.makeText(this@PdfIdStudioActivity, "Compression: Medium (Balanced)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        val btnHigh = makeCleanButton("Strong (Small)", 0xFF475569.toInt(), 0xFFFFFFFF.toInt(), 11.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f)
+            setOnClickListener {
+                pdfCompressLevel = 2
+                Toast.makeText(this@PdfIdStudioActivity, "Compression: Strong (Smallest KB)", Toast.LENGTH_SHORT).show()
+            }
+        }
+        levelRow.addView(btnLow)
+        levelRow.addView(btnMed)
+        levelRow.addView(btnHigh)
+        body.addView(levelRow)
+
+        val btnCompress = makeCleanButton("✓ Compress & Share PDF", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 13.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)).apply {
+                bottomMargin = dp(16)
+            }
             setOnClickListener { compressAndSharePdf() }
         }
         body.addView(btnCompress)
+
+        // Section B: Merge Multiple PDFs
+        val secMergeTitle = TextView(this).apply {
+            text = "2. MERGE MULTIPLE PDFs INTO ONE"
+            textSize = 12.5f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(0xFF0F172A.toInt())
+            setPadding(0, 0, 0, dp(6))
+        }
+        body.addView(secMergeTitle)
+
+        val mergeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(16)
+            }
+        }
+
+        val btnAddPdfs = makeCleanButton("+ Select PDFs", 0xFF1E3A8A.toInt(), 0xFFFFFFFF.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(6) }
+            setOnClickListener { multiPdfPicker.launch("application/pdf") }
+        }
+
+        val btnRunMerge = makeCleanButton("Merge & Share", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
+            setOnClickListener { mergeSelectedPdfsAndShare() }
+        }
+        mergeRow.addView(btnAddPdfs)
+        mergeRow.addView(btnRunMerge)
+        body.addView(mergeRow)
+
+        // Section C: Lock / Encrypt Sensitive File
+        val secLockTitle = TextView(this).apply {
+            text = "3. PASSWORD LOCK SELECTED PDF"
+            textSize = 12.5f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(0xFF0F172A.toInt())
+            setPadding(0, 0, 0, dp(6))
+        }
+        body.addView(secLockTitle)
+
+        val btnLockPdf = makeCleanButton("🔒 Set Password & Lock Selected PDF", 0xFF0F172A.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46))
+            setOnClickListener { promptPasswordAndLockPdf() }
+        }
+        body.addView(btnLockPdf)
+    }
+
+    private fun inspectPdfPagesAndKb(uri: Uri): Pair<Int, Int> {
+        return try {
+            val sizeBytes = contentResolver.openInputStream(uri)?.use { it.available() } ?: 0
+            val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return Pair(0, sizeBytes / 1024)
+            val renderer = PdfRenderer(pfd)
+            val count = renderer.pageCount
+            renderer.close()
+            pfd.close()
+            Pair(count, (sizeBytes / 1024).coerceAtLeast(1))
+        } catch (_: Exception) {
+            Pair(0, 0)
+        }
     }
 
     private fun compressAndSharePdf() {
@@ -775,16 +940,21 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
 
         try {
+            val scaleFactor = when (pdfCompressLevel) {
+                0 -> 0.85f
+                2 -> 0.48f
+                else -> 0.65f
+            }
             val pfd: ParcelFileDescriptor = contentResolver.openFileDescriptor(uri, "r") ?: return
             val renderer = PdfRenderer(pfd)
             val cleanName = sanitizeName(etFileName.text.toString(), "Compressed_Doc")
-            val outPdf = File(cacheDir, "$cleanName.pdf")
+            val outPdf = File(cacheDir, "${cleanName}_compressed.pdf")
             val pdfDoc = PdfDocument()
 
             for (i in 0 until renderer.pageCount) {
                 val page = renderer.openPage(i)
-                val targetW = (page.width * 0.72f).toInt().coerceAtLeast(600)
-                val targetH = ((page.height.toFloat() / page.width.toFloat()) * targetW).toInt().coerceAtLeast(800)
+                val targetW = (page.width * scaleFactor).toInt().coerceAtLeast(450)
+                val targetH = ((page.height.toFloat() / page.width.toFloat()) * targetW).toInt().coerceAtLeast(600)
                 val bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
                 bmp.eraseColor(Color.WHITE)
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -794,16 +964,105 @@ class PdfIdStudioActivity : AppCompatActivity() {
                 val p = pdfDoc.startPage(info)
                 p.canvas.drawBitmap(bmp, 0f, 0f, null)
                 pdfDoc.finishPage(p)
+                bmp.recycle()
             }
             renderer.close()
             pfd.close()
 
             FileOutputStream(outPdf).use { out -> pdfDoc.writeTo(out) }
             pdfDoc.close()
+
+            val newKb = (outPdf.length() / 1024L).toInt().coerceAtLeast(1)
+            tvPdfToolStatus?.text = "Compressed PDF Ready! New Size: ${newKb} KB"
             sharePdfFile(outPdf)
         } catch (e: Exception) {
             Toast.makeText(this, "Compress error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun mergeSelectedPdfsAndShare() {
+        if (mergePdfUris.size < 2) {
+            Toast.makeText(this, "Please select at least 2 PDF files to merge", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val cleanName = sanitizeName(etFileName.text.toString(), "Merged_PDF")
+            val outPdf = File(cacheDir, "${cleanName}_merged.pdf")
+            val pdfDoc = PdfDocument()
+            var globalPageNum = 1
+
+            for (pdfUri in mergePdfUris) {
+                val pfd = contentResolver.openFileDescriptor(pdfUri, "r") ?: continue
+                val renderer = PdfRenderer(pfd)
+                for (i in 0 until renderer.pageCount) {
+                    val page = renderer.openPage(i)
+                    val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                    bmp.eraseColor(Color.WHITE)
+                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val info = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, globalPageNum++).create()
+                    val p = pdfDoc.startPage(info)
+                    p.canvas.drawBitmap(bmp, 0f, 0f, null)
+                    pdfDoc.finishPage(p)
+                    bmp.recycle()
+                }
+                renderer.close()
+                pfd.close()
+            }
+
+            FileOutputStream(outPdf).use { out -> pdfDoc.writeTo(out) }
+            pdfDoc.close()
+            mergePdfUris.clear()
+            sharePdfFile(outPdf)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Merge error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun promptPasswordAndLockPdf() {
+        val uri = selectedPdfUri
+        if (uri == null || uri.scheme != "content") {
+            Toast.makeText(this, "Please select a PDF file in step 1 first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val pwdInput = EditText(this).apply {
+            hint = "Enter strong password (min 4 chars)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Encrypt & Lock PDF")
+            .setView(pwdInput)
+            .setPositiveButton("Lock & Save to Vault") { _, _ ->
+                val pwd = pwdInput.text.toString()
+                if (pwd.length < 4) {
+                    Toast.makeText(this, "Password must be at least 4 characters", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                try {
+                    val rawBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@setPositiveButton
+                    val keyBytes = MessageDigest.getInstance("SHA-256").digest(pwd.toByteArray(Charsets.UTF_8))
+                    val secretKey = SecretKeySpec(keyBytes, "AES")
+                    val cipher = Cipher.getInstance("AES")
+                    cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+                    val encrypted = cipher.doFinal(rawBytes)
+
+                    val cleanName = sanitizeName(etFileName.text.toString(), "Locked_Doc")
+                    val vaultDir = File(filesDir, "DocMitra/LockedDocs")
+                    if (!vaultDir.exists()) vaultDir.mkdirs()
+                    val lockedFile = File(vaultDir, "$cleanName.docmitra.enc")
+                    FileOutputStream(lockedFile).use { it.write(encrypted) }
+
+                    tvPdfToolStatus?.text = "AES-256 Encrypted & Locked in DocMitra Vault!"
+                    Toast.makeText(this, "PDF Encrypted & Locked securely!", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Lock error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun decodeSafeFileBitmap(file: File, maxDim: Int): Bitmap? {
