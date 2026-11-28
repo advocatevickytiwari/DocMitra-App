@@ -29,6 +29,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -55,15 +57,28 @@ class DocumentViewerActivity : AppCompatActivity() {
             val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
             val pages = scanResult?.pages
             if (!pages.isNullOrEmpty()) {
-                val uriList = ArrayList<String>()
-                for (page in pages) {
-                    uriList.add(page.imageUri.toString())
+                val safeUriList = ArrayList<String>()
+                for ((idx, page) in pages.withIndex()) {
+                    try {
+                        val outFile = File(cacheDir, "add_page_${System.currentTimeMillis()}_$idx.jpg")
+                        contentResolver.openInputStream(page.imageUri)?.use { input ->
+                            FileOutputStream(outFile).use { output -> input.copyTo(output) }
+                        }
+                        if (outFile.exists() && outFile.length() > 0) {
+                            val persistedUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", outFile)
+                            safeUriList.add(persistedUri.toString())
+                        }
+                    } catch (_: Exception) {
+                    }
                 }
-                val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
-                    putStringArrayListExtra("SCAN_URIS", uriList)
-                    putExtra("TARGET_PROJECT_DIR", projectDir.absolutePath)
+                if (safeUriList.isNotEmpty()) {
+                    val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
+                        putStringArrayListExtra("SCAN_URIS", safeUriList)
+                        putExtra("TARGET_PROJECT_DIR", projectDir.absolutePath)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(studioIntent)
                 }
-                startActivity(studioIntent)
             }
         }
     }
@@ -71,7 +86,6 @@ class DocumentViewerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Shield: FLAG_SECURE
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -102,6 +116,15 @@ class DocumentViewerActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFF1F5F9.toInt())
+        }
+
+        // Hardware-level Safe Area Insets
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            WindowInsetsCompat.CONSUMED
         }
 
         val topBar = LinearLayout(this).apply {
@@ -418,7 +441,7 @@ class DocumentViewerActivity : AppCompatActivity() {
             .setGalleryImportAllowed(true)
             .setPageLimit(20)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .build()
 
         GmsDocumentScanning.getClient(options).getStartScanIntent(this)
