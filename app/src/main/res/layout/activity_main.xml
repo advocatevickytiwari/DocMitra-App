@@ -6,7 +6,7 @@
     android:background="#F8FAFC"
     android:orientation="vertical">
 
-    <!-- Top Brand Header (#14532D Dark Green & #EA580C Vibrant Orange) -->
+    <!-- Top Brand Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -14,8 +14,8 @@
         android:elevation="2dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="14dp"
-        android:paddingVertical="10dp">
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp">
 
         <ImageView
             android:layout_width="34dp"
@@ -29,7 +29,7 @@
             android:layout_marginStart="8dp"
             android:text="Doc"
             android:textColor="#EA580C"
-            android:textSize="21sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
 
         <TextView
@@ -38,17 +38,20 @@
             android:layout_weight="1"
             android:text="Mitra"
             android:textColor="#14532D"
-            android:textSize="21sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnLangToggle"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="34dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             android:minWidth="0dp"
             android:paddingHorizontal="10dp"
             android:text="हिंदी / EN"
+            android:textAllCaps="false"
             android:textColor="#14532D"
             android:textSize="11sp"
             app:strokeColor="#14532D" />
@@ -56,9 +59,11 @@
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnAboutInfo"
             style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:layout_marginStart="4dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             android:minWidth="0dp"
             android:padding="0dp"
             android:text="ⓘ"
@@ -73,45 +78,94 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:paddingHorizontal="14dp"
-        android:paddingTop="10dp">
+        android:paddingHorizontal="12dp"
+        android:paddingTop="8dp">
 
-        <com.google.android.material.card.MaterialCardView
+        <!-- Search + Quick Gallery Import Row -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="46dp"
-            app:cardBackgroundColor="#FFFFFF"
-            app:cardCornerRadius="12dp"
-            app:cardElevation="1dp"
-            app:strokeColor="#CBD5E1"
-            app:strokeWidth="1dp">
+            android:layout_height="44dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-            <EditText
-                android:id="@+id/etSearchDocs"
-                android:layout_width="match_parent"
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:background="#00000000"
-                android:drawableStart="@android:drawable/ic_menu_search"
-                android:drawablePadding="8dp"
-                android:hint="Search documents..."
-                android:imeOptions="actionSearch"
-                android:inputType="text"
-                android:paddingHorizontal="12dp"
-                android:singleLine="true"
-                android:textColor="#0F172A"
-                android:textColorHint="#64748B"
-                android:textSize="14sp" />
-        </com.google.android.material.card.MaterialCardView>
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                app:cardBackgroundColor="#FFFFFF"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="1dp"
+                app:strokeColor="#CBD5E1"
+                app:strokeWidth="1dp">
 
-        <TextView
-            android:id="@+id/tvAllDocsCount"
+                <EditText
+                    android:id="@+id/etSearchDocs"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="#00000000"
+                    android:drawableStart="@android:drawable/ic_menu_search"
+                    android:drawablePadding="8dp"
+                    android:hint="Search docs &amp; folders..."
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:paddingHorizontal="10dp"
+                    android:singleLine="true"
+                    android:textColor="#0F172A"
+                    android:textColorHint="#64748B"
+                    android:textSize="13.5sp" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnQuickGallery"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:backgroundTint="#14532D"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:paddingHorizontal="12dp"
+                android:text="🖼 Import"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                app:cornerRadius="12dp" />
+        </LinearLayout>
+
+        <!-- Docs Count & Sort/Folder Bar -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:layout_marginBottom="8dp"
-            android:text="All docs (0)"
-            android:textColor="#14532D"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvAllDocsCount"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="All docs (0)"
+                android:textColor="#14532D"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSortDocs"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:paddingHorizontal="8dp"
+                android:text="⇅ Sort: Recent"
+                android:textAllCaps="false"
+                android:textColor="#475569"
+                android:textSize="11.5sp" />
+        </LinearLayout>
 
         <ScrollView
             android:layout_width="match_parent"
@@ -128,7 +182,7 @@
         </ScrollView>
     </LinearLayout>
 
-    <!-- Tab 2: Tools Grid Screen -->
+    <!-- Tab 2: Tools Grid Screen (With Your Original Custom Icons) -->
     <ScrollView
         android:id="@+id/viewToolsTab"
         android:layout_width="match_parent"
@@ -163,7 +217,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardPhotoCompress"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginEnd="5dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -177,23 +231,22 @@
                         android:layout_height="match_parent"
                         android:gravity="center"
                         android:orientation="vertical"
-                        android:padding="10dp">
+                        android:padding="8dp">
 
                         <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:src="@android:drawable/ic_menu_crop"
-                            app:tint="#EA580C" />
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
+                            android:src="@drawable/ic_tool_compress" />
 
                         <TextView
                             android:id="@+id/tvTool1"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="Photo &amp; Image\nCompress (KB)"
                             android:textColor="#0F172A"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -201,7 +254,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardExamPhoto"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginStart="5dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -215,23 +268,22 @@
                         android:layout_height="match_parent"
                         android:gravity="center"
                         android:orientation="vertical"
-                        android:padding="10dp">
+                        android:padding="8dp">
 
                         <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:src="@android:drawable/ic_menu_edit"
-                            app:tint="#14532D" />
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
+                            android:src="@drawable/ic_tool_exam" />
 
                         <TextView
                             android:id="@+id/tvTool2"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="Signature &amp;\nCustom Stamp"
                             android:textColor="#14532D"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -247,7 +299,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardImgToPdf"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginEnd="5dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -261,23 +313,22 @@
                         android:layout_height="match_parent"
                         android:gravity="center"
                         android:orientation="vertical"
-                        android:padding="10dp">
+                        android:padding="8dp">
 
                         <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:src="@android:drawable/ic_menu_gallery"
-                            app:tint="#14532D" />
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
+                            android:src="@drawable/ic_tool_img_pdf" />
 
                         <TextView
                             android:id="@+id/tvTool3"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="Image to PDF\nMaker"
                             android:textColor="#0F172A"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -285,7 +336,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardIdMerger"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginStart="5dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -299,23 +350,22 @@
                         android:layout_height="match_parent"
                         android:gravity="center"
                         android:orientation="vertical"
-                        android:padding="10dp">
+                        android:padding="8dp">
 
                         <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:src="@android:drawable/ic_menu_agenda"
-                            app:tint="#EA580C" />
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
+                            android:src="@drawable/ic_tool_id_merge" />
 
                         <TextView
                             android:id="@+id/tvTool4"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="ID Card Front\n&amp; Back Merger"
                             android:textColor="#0F172A"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -330,7 +380,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardPdfTools"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginEnd="5dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -344,23 +394,22 @@
                         android:layout_height="match_parent"
                         android:gravity="center"
                         android:orientation="vertical"
-                        android:padding="10dp">
+                        android:padding="8dp">
 
                         <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:src="@android:drawable/ic_menu_sort_by_size"
-                            app:tint="#EA580C" />
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
+                            android:src="@drawable/ic_tool_pdf_tools" />
 
                         <TextView
                             android:id="@+id/tvTool5"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="PDF Compress,\nMerge &amp; Lock"
                             android:textColor="#0F172A"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -368,7 +417,7 @@
                 <com.google.android.material.card.MaterialCardView
                     android:id="@+id/cardIdVault"
                     android:layout_width="0dp"
-                    android:layout_height="112dp"
+                    android:layout_height="116dp"
                     android:layout_marginStart="5dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="#FFFFFF"
@@ -382,23 +431,22 @@
                         android:layout_height="match_parent"
                         android:gravity="center"
                         android:orientation="vertical"
-                        android:padding="10dp">
+                        android:padding="8dp">
 
                         <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:src="@android:drawable/ic_lock_idle_lock"
-                            app:tint="#14532D" />
+                            android:layout_width="42dp"
+                            android:layout_height="42dp"
+                            android:src="@drawable/ic_tool_vault" />
 
                         <TextView
                             android:id="@+id/tvTool6"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
+                            android:layout_marginTop="6dp"
                             android:gravity="center"
                             android:text="My ID Vault\n(Fingerprint)"
                             android:textColor="#0F172A"
-                            android:textSize="12.5sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
