@@ -37,6 +37,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -144,12 +146,21 @@ class ScanPreviewActivity : AppCompatActivity() {
             setBackgroundColor(0xFF18181B.toInt())
         }
 
-        // Top Bar (OKEN Style: Back arrow + Editable Doc Name + Green Done button)
+        // Hardware-level Safe Area Insets: Never overlaps with camera hole/status bar or bottom gesture bar
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
+
+        // Top Bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF18181B.toInt())
-            setPadding(dp(10), dp(10), dp(12), dp(8))
+            setPadding(dp(8), dp(8), dp(10), dp(8))
         }
 
         val btnBack = MaterialButton(this).apply {
@@ -167,7 +178,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         etDocTitle = EditText(this).apply {
             setText(defaultDocName)
             hint = "Enter Document Name"
-            textSize = 14.5f
+            textSize = 14f
             setTextColor(0xFFFFFFFF.toInt())
             setHintTextColor(0xFFA1A1AA.toInt())
             setBackgroundColor(0x22FFFFFF)
@@ -310,7 +321,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         pageNavRow.addView(btnNext)
         root.addView(pageNavRow)
 
-        // Stamp Controls Bar (Visible when Mohar/Sign placed)
+        // Stamp Controls Bar
         stampControlsBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -388,11 +399,11 @@ class ScanPreviewActivity : AppCompatActivity() {
         filterScroll.addView(filterThumbRow)
         root.addView(filterScroll)
 
-        // OKEN-Style Bottom 5-Action Toolbar: Retake | Add | Rotate | Crop | Mohar/Sign
+        // OKEN-Style Bottom 5-Action Toolbar
         val bottomToolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(0xFF18181B.toInt())
-            setPadding(dp(4), dp(6), dp(4), dp(10))
+            setPadding(dp(4), dp(6), dp(4), dp(8))
         }
 
         fun makeBottomTool(icon: String, label: String, onClick: () -> Unit): LinearLayout {
@@ -481,7 +492,6 @@ class ScanPreviewActivity : AppCompatActivity() {
                 val parsedUri = Uri.parse(uriStr)
                 decodeSafeUri(parsedUri, 1600)?.let { bmp ->
                     loadedOrig.add(bmp)
-                    // Default to Magic Color (index 3) just like OKEN Scanner
                     loadedEdit.add(applyOkenFilter(bmp, 3))
                 }
             }
@@ -588,7 +598,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
     }
 
-    // 0: No shadow, 1: Original, 2: Lighten, 3: Magic Color, 4: Doc Clear, 5: Grayscale
     private fun applyOkenFilter(src: Bitmap, mode: Int): Bitmap {
         val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
@@ -604,27 +613,27 @@ class ScanPreviewActivity : AppCompatActivity() {
         var brightness = 0f
 
         when (mode) {
-            0 -> { // No shadow (bright white paper + sharp ink)
+            0 -> {
                 cm.setSaturation(1.1f)
                 contrast = 1.48f
                 brightness = 34f
             }
-            2 -> { // Lighten
+            2 -> {
                 cm.setSaturation(1.05f)
                 contrast = 1.15f
                 brightness = 28f
             }
-            3 -> { // Magic Color (Vibrant HD text & colors)
+            3 -> {
                 cm.setSaturation(1.32f)
                 contrast = 1.38f
                 brightness = 14f
             }
-            4 -> { // Doc Clear (High contrast crisp document)
+            4 -> {
                 cm.setSaturation(0.25f)
                 contrast = 1.65f
                 brightness = 22f
             }
-            5 -> { // Grayscale / B&W
+            5 -> {
                 cm.setSaturation(0f)
                 contrast = 1.75f
                 brightness = 18f
