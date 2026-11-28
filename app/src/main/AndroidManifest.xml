@@ -48,6 +48,10 @@
         </activity>
 
         <activity
+            android:name=".DocumentViewerActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".PhotoStudioActivity"
             android:exported="false" />
 
