@@ -76,21 +76,31 @@
         android:paddingHorizontal="14dp"
         android:paddingTop="10dp">
 
-        <EditText
-            android:id="@+id/etSearchDocs"
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:background="@drawable/bg_search_bar"
-            android:drawableStart="@android:drawable/ic_menu_search"
-            android:drawablePadding="8dp"
-            android:hint="Search documents..."
-            android:imeOptions="actionSearch"
-            android:inputType="text"
-            android:paddingHorizontal="12dp"
-            android:singleLine="true"
-            android:textColor="#0F172A"
-            android:textColorHint="#64748B"
-            android:textSize="14sp" />
+            android:layout_height="46dp"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="1dp"
+            app:strokeColor="#CBD5E1"
+            app:strokeWidth="1dp">
+
+            <EditText
+                android:id="@+id/etSearchDocs"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#00000000"
+                android:drawableStart="@android:drawable/ic_menu_search"
+                android:drawablePadding="8dp"
+                android:hint="Search documents..."
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:paddingHorizontal="12dp"
+                android:singleLine="true"
+                android:textColor="#0F172A"
+                android:textColorHint="#64748B"
+                android:textSize="14sp" />
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:id="@+id/tvAllDocsCount"
