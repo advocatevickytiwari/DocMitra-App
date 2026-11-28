@@ -61,7 +61,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ivTabTools: ImageView
     private lateinit var tvTabTools: TextView
 
-    // Runtime Camera Permission Launcher
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -72,7 +71,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Direct System Camera Fallback (100% reliable on every Android phone)
     private val directCameraLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
@@ -85,7 +83,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Direct Multi-Image Gallery Picker
     private val galleryMultiLauncher = registerForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris ->
@@ -106,7 +103,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ML Kit Document Scanner Launcher (Immediately persists URIs to cache before opening preview so Next never fails)
     private val scannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -175,7 +171,6 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, AboutActivity::class.java))
         }
 
-        // Clicking Scan button asks cleanly: Smart Auto-Scan / Camera / Gallery
         findViewById<MaterialCardView>(R.id.cardCamScan).setOnClickListener {
             if (isBusyProcessing) return@setOnClickListener
             targetProjectFolderForScan = null
@@ -269,7 +264,6 @@ class MainActivity : AppCompatActivity() {
                 scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
             }
             .addOnFailureListener {
-                // Automatic fallback to Direct System Camera if ML Kit service is busy
                 checkPermissionAndLaunchCamera()
             }
     }
@@ -643,7 +637,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, PhotoStudioActivity::class.java).apply { putExtra("MODE", "COMPRESS") })
         }
         findViewById<MaterialCardView>(R.id.cardExamPhoto).setOnClickListener {
-            startActivity(Intent(this, PhotoStudioActivity::class.java).apply { putExtra("MODE", "EXAM") })
+            startActivity(Intent(this, PhotoStudioActivity::class.java).apply { putExtra("MODE", "STAMP_SIGN") })
         }
         findViewById<MaterialCardView>(R.id.cardImgToPdf).setOnClickListener {
             startActivity(Intent(this, PdfIdStudioActivity::class.java).apply { putExtra("MODE", "IMG_TO_PDF") })
@@ -667,7 +661,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvTool1).text =
             if (isHindi) "फोटो साइज कम\nकरें (KB)" else "Photo & Image\nCompress (KB)"
         findViewById<TextView>(R.id.tvTool2).text =
-            if (isHindi) "एग्जाम फोटो व\nनाम/तारीख" else "Exam Photo &\nName / Date"
+            if (isHindi) "मोहर व हस्ताक्षर\n(Stamp & Sign)" else "Signature &\nCustom Stamp"
         findViewById<TextView>(R.id.tvTool3).text =
             if (isHindi) "फोटो से PDF\nबनाएं" else "Image to PDF\nMaker"
         findViewById<TextView>(R.id.tvTool4).text =
