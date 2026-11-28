@@ -1,18 +1,15 @@
 package com.docmitra.scanner
 
 import android.app.Activity
-import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Matrix
+import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.ParcelFileDescriptor
-import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -44,7 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     private var isHindi = false
     private var currentSearchQuery = ""
-    private var appendTargetFilePath: String? = null
+    private var targetProjectFolderForScan: String? = null
 
     private lateinit var recentDocsContainer: LinearLayout
     private lateinit var tvAllDocsCount: TextView
@@ -68,15 +65,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
                     putStringArrayListExtra("SCAN_URIS", uriList)
-                    putExtra("APPEND_TARGET_PATH", appendTargetFilePath)
+                    putExtra("TARGET_PROJECT_DIR", targetProjectFolderForScan)
                 }
-                appendTargetFilePath = null
+                targetProjectFolderForScan = null
                 startActivity(studioIntent)
             } else {
-                appendTargetFilePath = null
+                targetProjectFolderForScan = null
             }
         } else {
-            appendTargetFilePath = null
+            targetProjectFolderForScan = null
         }
     }
 
@@ -90,7 +87,7 @@ class MainActivity : AppCompatActivity() {
         )
 
         setContentView(R.layout.activity_main)
-        migrateLegacyExternalDocsToPrivateSandbox()
+        migrateAllLegacyDocsToProjectFolders()
 
         recentDocsContainer = findViewById(R.id.recentDocsContainer)
         tvAllDocsCount = findViewById(R.id.tvAllDocsCount)
@@ -111,7 +108,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<MaterialCardView>(R.id.cardCamScan).setOnClickListener {
-            appendTargetFilePath = null
+            targetProjectFolderForScan = null
             startDocumentScanner()
         }
 
@@ -127,7 +124,7 @@ class MainActivity : AppCompatActivity() {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 currentSearchQuery = s?.toString()?.trim() ?: ""
-                loadSavedDocuments()
+                loadProjectFolders()
             }
             override fun afterTextChanged(s: Editable?) {}
         })
@@ -139,36 +136,63 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         switchTab(showDocs = true)
-        loadSavedDocuments()
+        loadProjectFolders()
     }
 
     override fun onResume() {
         super.onResume()
-        loadSavedDocuments()
+        loadProjectFolders()
     }
 
-    private fun getSecureStorageDir(): File {
-        val dir = File(filesDir, "DocMitra")
+    private fun getSecureProjectsRoot(): File {
+        val dir = File(filesDir, "DocMitra/Projects")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
 
-    private fun migrateLegacyExternalDocsToPrivateSandbox() {
-        try {
-            val legacyDir = File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
-            if (legacyDir.exists() && legacyDir.isDirectory) {
-                val secureDir = getSecureStorageDir()
-                legacyDir.listFiles()?.forEach { oldFile ->
-                    if (oldFile.isFile) {
-                        val dest = File(secureDir, oldFile.name)
-                        if (!dest.exists()) {
-                            oldFile.copyTo(dest, overwrite = false)
+    // Automatically converts older single/PDF files into high-speed HD Project Folders inside sandbox
+    private fun migrateAllLegacyDocsToProjectFolders() {
+        val projectsRoot = getSecureProjectsRoot()
+        val legacyDirs = listOf(
+            File(filesDir, "DocMitra"),
+            File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "DocMitra")
+        )
+
+        for (legacyDir in legacyDirs) {
+            if (!legacyDir.exists() || !legacyDir.isDirectory) continue
+            legacyDir.listFiles()?.forEach { file ->
+                if (!file.isFile) return@forEach
+                try {
+                    val projName = file.nameWithoutExtension
+                        .replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "")
+                        .trim()
+                        .ifEmpty { "Migrated_Doc" }
+                    val projDir = File(projectsRoot, projName)
+                    if (!projDir.exists()) projDir.mkdirs()
+
+                    if (file.extension.equals("pdf", ignoreCase = true)) {
+                        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                        val renderer = PdfRenderer(pfd)
+                        for (i in 0 until renderer.pageCount) {
+                            val page = renderer.openPage(i)
+                            val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                            bmp.eraseColor(0xFFFFFFFF.toInt())
+                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            page.close()
+                            val outJpg = File(projDir, String.format(Locale.US, "page_%04d.jpg", i + 1))
+                            FileOutputStream(outJpg).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) }
                         }
-                        oldFile.delete()
+                        renderer.close()
+                        pfd.close()
+                        file.delete()
+                    } else if (file.extension.equals("jpg", ignoreCase = true)) {
+                        val outJpg = File(projDir, "page_0001.jpg")
+                        if (!outJpg.exists()) file.copyTo(outJpg)
+                        file.delete()
                     }
+                } catch (_: Exception) {
                 }
             }
-        } catch (_: Exception) {
         }
     }
 
@@ -198,41 +222,40 @@ class MainActivity : AppCompatActivity() {
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE_WITH_FILTER)
             .build()
 
-        val scanner = GmsDocumentScanning.getClient(options)
-        scanner.getStartScanIntent(this)
+        GmsDocumentScanning.getClient(options).getStartScanIntent(this)
             .addOnSuccessListener { intentSender ->
                 scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
             }
             .addOnFailureListener { e ->
-                appendTargetFilePath = null
-                Toast.makeText(this, "Scanner ready nahi hai, dobara tap karein: ${e.message}", Toast.LENGTH_SHORT).show()
+                targetProjectFolderForScan = null
+                Toast.makeText(this, "Scanner initializing, please tap again: ${e.message}", Toast.LENGTH_SHORT).show()
             }
     }
 
-    private fun loadSavedDocuments() {
+    private fun loadProjectFolders() {
         recentDocsContainer.removeAllViews()
-        val dir = getSecureStorageDir()
+        val root = getSecureProjectsRoot()
 
-        val allFiles = dir.listFiles { file ->
-            file.isFile && (file.extension.equals("pdf", ignoreCase = true) || file.extension.equals("jpg", ignoreCase = true))
+        val allProjects = root.listFiles { file ->
+            file.isDirectory && (file.listFiles { f -> f.isFile && f.extension.equals("jpg", ignoreCase = true) }?.isNotEmpty() == true)
         }?.sortedByDescending { it.lastModified() } ?: emptyList()
 
-        val filteredFiles = if (currentSearchQuery.isEmpty()) {
-            allFiles
+        val filteredProjects = if (currentSearchQuery.isEmpty()) {
+            allProjects
         } else {
-            allFiles.filter { it.name.contains(currentSearchQuery, ignoreCase = true) }
+            allProjects.filter { it.name.contains(currentSearchQuery, ignoreCase = true) }
         }
 
-        tvAllDocsCount.text = if (isHindi) "सभी फाइलें (${filteredFiles.size})" else "All docs (${filteredFiles.size})"
+        tvAllDocsCount.text = if (isHindi) "सभी फाइलें (${filteredProjects.size})" else "All docs (${filteredProjects.size})"
 
-        if (filteredFiles.isEmpty()) {
+        if (filteredProjects.isEmpty()) {
             val emptyTv = TextView(this).apply {
                 text = if (currentSearchQuery.isNotEmpty()) {
                     "No matching document found."
                 } else if (isHindi) {
-                    "नीचे ऑरेंज कैमरा बटन दबाएं → फोटो खींचें → ऊपर नाम लिखें और '✓ Done & Save' दबाएं।"
+                    "नीचे ऑरेंज कैमरा बटन दबाएं → फोटो खींचें → मोहर/साइन लगाएं और '✓ Save HD' दबाएं।"
                 } else {
-                    "Tap the orange Camera button below to scan, name your file at the top, and tap '✓ Done & Save'."
+                    "Tap the orange Camera button below to scan, add your Mohar/Sign, and tap '✓ Save HD'."
                 }
                 setTextColor(0xFF64748B.toInt())
                 textSize = 14f
@@ -244,8 +267,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         val density = resources.displayMetrics.density
-        for (file in filteredFiles) {
-            val isPdf = file.extension.equals("pdf", ignoreCase = true)
+        for (projDir in filteredProjects) {
+            val pages = projDir.listFiles { f ->
+                f.isFile && f.extension.equals("jpg", ignoreCase = true)
+            }?.sortedBy { it.name } ?: continue
+
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -280,7 +306,8 @@ class MainActivity : AppCompatActivity() {
                 )
                 scaleType = ImageView.ScaleType.CENTER_CROP
             }
-            val thumbBmp = generateFileThumbnail(file, isPdf)
+            val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+            val thumbBmp = BitmapFactory.decodeFile(pages.first().absolutePath, opts)
             if (thumbBmp != null) {
                 thumbIv.setImageBitmap(thumbBmp)
             } else {
@@ -296,20 +323,19 @@ class MainActivity : AppCompatActivity() {
             }
 
             val titleTv = TextView(this).apply {
-                text = file.nameWithoutExtension
+                text = projDir.name
                 setTextColor(0xFF0F172A.toInt())
                 textSize = 15f
                 maxLines = 1
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
             }
 
-            val dateStr = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
-            val sizeKb = (file.length() / 1024).coerceAtLeast(1)
-            val pageCount = if (isPdf) getPdfPageCount(file) else 1
-            val badgeText = "$pageCount ${if (pageCount == 1) "Page" else "Pages"}"
+            val dateStr = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(projDir.lastModified()))
+            val totalKb = (pages.sumOf { it.length() } / 1024).coerceAtLeast(1)
+            val badgeText = "${pages.size} ${if (pages.size == 1) "Page" else "Pages"}"
 
             val subTv = TextView(this).apply {
-                text = "$dateStr • $badgeText • ${sizeKb}KB"
+                text = "$dateStr • $badgeText • HD"
                 setTextColor(0xFF14532D.toInt())
                 textSize = 11f
                 setPadding(0, (3 * density).toInt(), 0, 0)
@@ -318,7 +344,6 @@ class MainActivity : AppCompatActivity() {
             infoCol.addView(titleTv)
             infoCol.addView(subTv)
 
-            // Direct 1-Tap Share button on every card (OK Scanner style)
             val shareBtn = MaterialButton(this).apply {
                 text = "Share"
                 textSize = 11f
@@ -326,7 +351,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
                 setBackgroundColor(0xFFF0FDF4.toInt())
                 setTextColor(0xFF14532D.toInt())
-                setOnClickListener { shareDocumentFile(file, isPdf) }
+                setOnClickListener { shareProjectAsPdf(projDir, pages) }
             }
 
             val moreBtn = MaterialButton(this).apply {
@@ -336,7 +361,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
                 setBackgroundColor(0x00000000)
                 setTextColor(0xFF475569.toInt())
-                setOnClickListener { showDocumentOptions(file, isPdf) }
+                setOnClickListener { showProjectOptions(projDir, pages) }
             }
 
             row.addView(thumbCard)
@@ -344,265 +369,54 @@ class MainActivity : AppCompatActivity() {
             row.addView(shareBtn)
             row.addView(moreBtn)
             card.addView(row)
-            card.setOnClickListener { openDocument(file, isPdf) }
+            card.setOnClickListener {
+                val viewerIntent = Intent(this, DocumentViewerActivity::class.java).apply {
+                    putExtra("PROJECT_DIR_PATH", projDir.absolutePath)
+                }
+                startActivity(viewerIntent)
+            }
 
             recentDocsContainer.addView(card)
         }
     }
 
-    private fun generateFileThumbnail(file: File, isPdf: Boolean): Bitmap? {
-        return try {
-            if (!isPdf) {
-                val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
-                BitmapFactory.decodeFile(file.absolutePath, opts)
-            } else {
-                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = PdfRenderer(pfd)
-                var bmp: Bitmap? = null
-                if (renderer.pageCount > 0) {
-                    val page = renderer.openPage(0)
-                    bmp = Bitmap.createBitmap(160, 200, Bitmap.Config.ARGB_8888)
-                    bmp.eraseColor(0xFFFFFFFF.toInt())
-                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
-                }
-                renderer.close()
-                pfd.close()
-                bmp
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun getPdfPageCount(file: File): Int {
-        return try {
-            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            val renderer = PdfRenderer(pfd)
-            val count = renderer.pageCount
-            renderer.close()
-            pfd.close()
-            count
-        } catch (_: Exception) {
-            1
-        }
-    }
-
-    private fun openDocument(file: File, isPdf: Boolean) {
-        if (!isPdf) {
-            val pdfTarget = convertJpgToPdfFile(file) ?: return
-            openDocument(pdfTarget, true)
-            return
-        }
-
-        try {
-            val density = resources.displayMetrics.density
-            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            val renderer = PdfRenderer(pfd)
-            val totalPages = renderer.pageCount
-
-            val container = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding((12 * density).toInt(), (8 * density).toInt(), (12 * density).toInt(), (12 * density).toInt())
-            }
-
-            var dialogRef: AlertDialog? = null
-
-            for (i in 0 until totalPages) {
-                val page = renderer.openPage(i)
-                val targetW = 720
-                val targetH = ((page.height.toFloat() / page.width.toFloat()) * targetW).toInt().coerceAtLeast(100)
-                val bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-                bmp.eraseColor(0xFFFFFFFF.toInt())
-                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                page.close()
-
-                val headerRow = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, (10 * density).toInt(), 0, (4 * density).toInt())
-                }
-
-                val pageLabel = TextView(this).apply {
-                    text = "Page ${i + 1} of $totalPages"
-                    textSize = 13f
-                    setTextColor(0xFF14532D.toInt())
-                    setTypeface(null, android.graphics.Typeface.BOLD)
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
-
-                val btnRotate = MaterialButton(this).apply {
-                    text = "↻ Rotate"
-                    textSize = 11f
-                    minWidth = 0
-                    setTextColor(0xFF14532D.toInt())
-                    setBackgroundColor(0xFFE2E8F0.toInt())
-                    setOnClickListener {
-                        dialogRef?.dismiss()
-                        modifyPdfPage(file, i, deletePage = false)
-                    }
-                }
-
-                headerRow.addView(pageLabel)
-                headerRow.addView(btnRotate)
-
-                if (totalPages > 1) {
-                    val btnDelPage = MaterialButton(this).apply {
-                        text = "🗑"
-                        textSize = 12f
-                        minWidth = 0
-                        setTextColor(0xFFDC2626.toInt())
-                        setBackgroundColor(0xFFFEE2E2.toInt())
-                        layoutParams = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply { marginStart = (6 * density).toInt() }
-                        setOnClickListener {
-                            dialogRef?.dismiss()
-                            modifyPdfPage(file, i, deletePage = true)
-                        }
-                    }
-                    headerRow.addView(btnDelPage)
-                }
-
-                val iv = ImageView(this).apply {
-                    setImageBitmap(bmp)
-                    adjustViewBounds = true
-                    setBackgroundColor(0xFFE2E8F0.toInt())
-                    setPadding(2, 2, 2, 2)
-                }
-
-                container.addView(headerRow)
-                container.addView(iv)
-            }
-
-            renderer.close()
-            pfd.close()
-
-            val scrollView = ScrollView(this).apply { addView(container) }
-
-            dialogRef = AlertDialog.Builder(this)
-                .setTitle("${file.nameWithoutExtension} ($totalPages Pages)")
-                .setView(scrollView)
-                .setPositiveButton("+ Add More Photos") { _, _ ->
-                    appendTargetFilePath = file.absolutePath
-                    startDocumentScanner()
-                }
-                .setNeutralButton("Share") { _, _ -> shareDocumentFile(file, true) }
-                .setNegativeButton("Close", null)
-                .show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "Could not open file: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun modifyPdfPage(pdfFile: File, targetPageIndex: Int, deletePage: Boolean) {
-        try {
-            val pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY)
-            val renderer = PdfRenderer(pfd)
-            val updatedBitmaps = ArrayList<Bitmap>()
-
-            for (i in 0 until renderer.pageCount) {
-                val page = renderer.openPage(i)
-                val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
-                bmp.eraseColor(0xFFFFFFFF.toInt())
-                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                page.close()
-
-                if (i == targetPageIndex) {
-                    if (!deletePage) {
-                        val matrix = Matrix().apply { postRotate(90f) }
-                        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-                        updatedBitmaps.add(rotated)
-                    }
-                } else {
-                    updatedBitmaps.add(bmp)
-                }
-            }
-            renderer.close()
-            pfd.close()
-
-            if (updatedBitmaps.isNotEmpty()) {
-                val pdfDoc = PdfDocument()
-                for (i in updatedBitmaps.indices) {
-                    val b = updatedBitmaps[i]
-                    val info = PdfDocument.PageInfo.Builder(b.width, b.height, i + 1).create()
-                    val p = pdfDoc.startPage(info)
-                    p.canvas.drawBitmap(b, 0f, 0f, null)
-                    pdfDoc.finishPage(p)
-                }
-                FileOutputStream(pdfFile).use { out -> pdfDoc.writeTo(out) }
-                pdfDoc.close()
-
-                Toast.makeText(
-                    this,
-                    if (deletePage) "Page removed!" else "Page rotated 90°!",
-                    Toast.LENGTH_SHORT
-                ).show()
-                loadSavedDocuments()
-                openDocument(pdfFile, true)
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Update failed: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun convertJpgToPdfFile(jpgFile: File): File? {
-        return try {
-            val bmp = BitmapFactory.decodeFile(jpgFile.absolutePath) ?: return null
-            val pdfFile = File(jpgFile.parentFile, "${jpgFile.nameWithoutExtension}.pdf")
-            val pdfDoc = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, 1).create()
-            val page = pdfDoc.startPage(pageInfo)
-            page.canvas.drawBitmap(bmp, 0f, 0f, null)
-            pdfDoc.finishPage(page)
-            FileOutputStream(pdfFile).use { out -> pdfDoc.writeTo(out) }
-            pdfDoc.close()
-            jpgFile.delete()
-            pdfFile
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun showDocumentOptions(file: File, isPdf: Boolean) {
+    private fun showProjectOptions(projDir: File, pages: List<File>) {
         val options = arrayOf(
+            "Open Full-Screen (Zoom & Reorder)",
             "+ Add More Photos",
-            "Open & Edit Pages",
             "Rename (e.g. Pawan / Ram Singh)",
-            "Save Page 1 to Gallery",
-            "Share PDF",
+            "Share HD PDF",
             "Delete File"
         )
 
         AlertDialog.Builder(this)
-            .setTitle(file.nameWithoutExtension)
+            .setTitle(projDir.name)
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> {
-                        val targetPdf = if (isPdf) file else convertJpgToPdfFile(file)
-                        if (targetPdf != null) {
-                            appendTargetFilePath = targetPdf.absolutePath
-                            startDocumentScanner()
-                        }
+                        startActivity(Intent(this, DocumentViewerActivity::class.java).apply {
+                            putExtra("PROJECT_DIR_PATH", projDir.absolutePath)
+                        })
                     }
-                    1 -> openDocument(file, isPdf)
-                    2 -> promptRenameFile(file)
-                    3 -> saveFirstPageToGallery(file, isPdf)
-                    4 -> shareDocumentFile(file, isPdf)
-                    5 -> {
-                        file.delete()
+                    1 -> {
+                        targetProjectFolderForScan = projDir.absolutePath
+                        startDocumentScanner()
+                    }
+                    2 -> promptRenameProject(projDir)
+                    3 -> shareProjectAsPdf(projDir, pages)
+                    4 -> {
+                        projDir.deleteRecursively()
                         Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
-                        loadSavedDocuments()
+                        loadProjectFolders()
                     }
                 }
             }
             .show()
     }
 
-    private fun promptRenameFile(file: File) {
+    private fun promptRenameProject(projDir: File) {
         val input = EditText(this).apply {
-            setText(file.nameWithoutExtension)
+            setText(projDir.name)
             hint = "Enter name (e.g. Pawan, Ram Singh)"
             setSelection(text.length)
         }
@@ -616,10 +430,10 @@ class MainActivity : AppCompatActivity() {
                     .trim()
                     .take(50)
                 if (newName.isNotEmpty()) {
-                    val dest = File(file.parentFile, "$newName.${file.extension}")
-                    if (file.renameTo(dest)) {
+                    val dest = File(projDir.parentFile, newName)
+                    if (!dest.exists() && projDir.renameTo(dest)) {
                         Toast.makeText(this, "Saved as '$newName'", Toast.LENGTH_SHORT).show()
-                        loadSavedDocuments()
+                        loadProjectFolders()
                     }
                 }
             }
@@ -627,55 +441,32 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun saveFirstPageToGallery(file: File, isPdf: Boolean) {
+    private fun shareProjectAsPdf(projDir: File, pages: List<File>) {
         try {
-            val bmp: Bitmap? = if (!isPdf) {
-                BitmapFactory.decodeFile(file.absolutePath)
-            } else {
-                val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = PdfRenderer(pfd)
-                var pageBmp: Bitmap? = null
-                if (renderer.pageCount > 0) {
-                    val page = renderer.openPage(0)
-                    pageBmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
-                    pageBmp.eraseColor(0xFFFFFFFF.toInt())
-                    page.render(pageBmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
+            val cachePdf = File(cacheDir, "${projDir.name}.pdf")
+            val pdfDoc = PdfDocument()
+            pages.forEachIndexed { idx, imgFile ->
+                val bmp = BitmapFactory.decodeFile(imgFile.absolutePath)
+                if (bmp != null) {
+                    val info = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, idx + 1).create()
+                    val page = pdfDoc.startPage(info)
+                    page.canvas.drawBitmap(bmp, 0f, 0f, null)
+                    pdfDoc.finishPage(page)
                 }
-                renderer.close()
-                pfd.close()
-                pageBmp
             }
-            if (bmp == null) return
+            FileOutputStream(cachePdf).use { out -> pdfDoc.writeTo(out) }
+            pdfDoc.close()
 
-            val imgName = "${file.nameWithoutExtension}.jpg"
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, imgName)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocMitra")
-                }
-                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) } }
-            } else {
-                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
-                if (!dir.exists()) dir.mkdirs()
-                FileOutputStream(File(dir, imgName)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 96, out) }
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", cachePdf)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            Toast.makeText(this, "Saved to Gallery (Pictures/DocMitra)!", Toast.LENGTH_LONG).show()
+            startActivity(Intent.createChooser(intent, "Share HD PDF"))
         } catch (e: Exception) {
-            Toast.makeText(this, "Gallery save error: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Share error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-    }
-
-    private fun shareDocumentFile(file: File, isPdf: Boolean) {
-        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = if (isPdf) "application/pdf" else "image/jpeg"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "Share Document"))
     }
 
     private fun setupUtilityCards() {
@@ -716,6 +507,6 @@ class MainActivity : AppCompatActivity() {
             if (isHindi) "PDF कंप्रेस,\nमर्ज व लॉक" else "PDF Compress,\nMerge & Lock"
         findViewById<TextView>(R.id.tvTool6).text =
             if (isHindi) "मेरा ID वॉल्ट\n(फिंगरप्रिंट)" else "My ID Vault\n(Fingerprint)"
-        loadSavedDocuments()
+        loadProjectFolders()
     }
 }
