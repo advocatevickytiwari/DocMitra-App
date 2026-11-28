@@ -1,6 +1,5 @@
 package com.docmitra.scanner
 
-import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -43,7 +42,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.min
 
 class PdfIdStudioActivity : AppCompatActivity() {
@@ -51,7 +49,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
     private var mode = "ID_MERGE"
     private var frontBitmap: Bitmap? = null
     private var backBitmap: Bitmap? = null
-    private var activeIdSide = 1 // 1 = Front, 2 = Back
+    private var activeIdSide = 1
     private var isSideBySide = false
     private var tempCameraFile: File? = null
 
@@ -63,7 +61,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
     private val selectedImages = ArrayList<Bitmap>()
     private var selectedPdfUri: Uri? = null
 
-    // Direct Camera Launcher (Opens phone camera directly for Front or Back)
     private val directCameraLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
@@ -77,7 +74,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
-    // Direct Gallery Picker for Front or Back
     private val singleGalleryPicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -318,7 +314,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         sidesRow.addView(backCard)
         body.addView(sidesRow)
 
-        // Layout Switch Row: Top-Bottom vs Side-by-Side
         val layoutRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -355,7 +350,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         layoutRow.addView(btnSideBySide)
         body.addView(layoutRow)
 
-        // Live A4 Preview
         ivMergedPreview = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -367,7 +361,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
         body.addView(ivMergedPreview)
 
-        // Two Clear Action Buttons: Save Photo (App + Gallery) & Share PDF
         val saveRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
@@ -414,7 +407,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
-    // Interactive Manual Crop + Rotate Dialog so user can trim card edges cleanly
     private fun openInteractiveCropDialog(sourceBmp: Bitmap) {
         var workingBmp = sourceBmp
         val density = resources.displayMetrics.density
@@ -446,7 +438,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            loadBitmap(workingBmp)
+            setupBitmap(workingBmp)
         }
         cropFrame.addView(cropEditorView)
 
@@ -462,7 +454,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
             setOnClickListener {
                 val m = Matrix().apply { postRotate(90f) }
                 workingBmp = Bitmap.createBitmap(workingBmp, 0, 0, workingBmp.width, workingBmp.height, m, true)
-                cropEditorView.loadBitmap(workingBmp)
+                cropEditorView.setupBitmap(workingBmp)
             }
         }
 
@@ -475,7 +467,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
             .setView(dialogLayout)
             .setCancelable(false)
             .setPositiveButton("✓ Crop & Use") { _, _ ->
-                val cropped = cropEditorView.getCroppedBitmap()
+                val cropped = cropEditorView.extractCroppedBitmap()
                 if (activeIdSide == 1) {
                     frontBitmap = cropped
                     ivFrontPreview.setImageBitmap(cropped)
@@ -499,7 +491,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
             .show()
     }
 
-    // Draws image inside target slot preserving exact natural Aspect Ratio (Never stretches/distorts)
     private fun drawBitmapFitInsideSlot(canvas: Canvas, bmp: Bitmap, slot: RectF, paint: Paint) {
         val imgRatio = bmp.width.toFloat() / bmp.height.toFloat().coerceAtLeast(1f)
         val slotRatio = slot.width() / slot.height().coerceAtLeast(1f)
@@ -548,7 +539,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         val imgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         if (!isSideBySide) {
-            // Standard ID Card Aspect Ratio (85.6mm x 54mm -> ~1.585:1)
             val maxSlotW = 900f
             val maxSlotH = 570f
             val left = (pageW - maxSlotW) / 2f
@@ -616,14 +606,12 @@ class PdfIdStudioActivity : AppCompatActivity() {
                 "ID_${SimpleDateFormat("ddMM_HHmm", Locale.getDefault()).format(Date())}"
             )
 
-            // Save inside secure HD Project Folder
             val projDir = File(filesDir, "DocMitra/Projects/$cleanName")
             if (!projDir.exists()) projDir.mkdirs()
             val pageFile = File(projDir, "page_0001.jpg")
             FileOutputStream(pageFile).use { out -> a4Sheet.compress(Bitmap.CompressFormat.JPEG, 95, out) }
             projDir.setLastModified(System.currentTimeMillis())
 
-            // Always save copy to Phone Gallery (Pictures/DocMitra)
             saveBitmapToGallery(a4Sheet, "$cleanName.jpg")
 
             if (sharePdfAfter) {
@@ -645,8 +633,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
             Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
-
-    // ==================== IMAGE TO PDF MODE ====================
 
     private fun buildImageToPdfUi(body: LinearLayout, dp: (Int) -> Int) {
         val btnSelect = MaterialButton(this).apply {
@@ -708,8 +694,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
         body.addView(btnCreate)
     }
-
-    // ==================== PDF COMPRESS MODE ====================
 
     private fun buildPdfToolsUi(body: LinearLayout, dp: (Int) -> Int) {
         val btnPickPdf = MaterialButton(this).apply {
@@ -799,4 +783,204 @@ class PdfIdStudioActivity : AppCompatActivity() {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
             var sample = 1
-            while
+            while (bounds.outWidth / sample > maxDim || bounds.outHeight / sample > maxDim) {
+                sample *= 2
+            }
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun sanitizeName(raw: String, fallback: String): String {
+        return raw.replace("[^a-zA-Z0-9\\u0900-\\u097F_\\- ]".toRegex(), "")
+            .replace("..", "")
+            .trim()
+            .take(50)
+            .ifEmpty { fallback }
+    }
+
+    private fun saveBitmapToGallery(bmp: Bitmap, fileName: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocMitra")
+                }
+                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) } }
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
+                if (!dir.exists()) dir.mkdirs()
+                FileOutputStream(File(dir, fileName)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun sharePdfFile(file: File) {
+        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share PDF"))
+    }
+
+    private class InteractiveCropView(context: Context) : View(context) {
+        private var srcBmp: Bitmap? = null
+        private val imgRect = RectF()
+        private val cropRect = RectF()
+        private var activeHandle = 0
+        private var lastX = 0f
+        private var lastY = 0f
+
+        private val shadePaint = Paint().apply {
+            color = 0x88000000.toInt()
+            style = Paint.Style.FILL
+        }
+        private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFEA580C.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+        }
+        private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFEA580C.toInt()
+            style = Paint.Style.FILL
+        }
+        private val handleRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 4f
+        }
+
+        fun setupBitmap(bmp: Bitmap) {
+            srcBmp = bmp
+            recalculateRects()
+            invalidate()
+        }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            recalculateRects()
+        }
+
+        private fun recalculateRects() {
+            val bmp = srcBmp ?: return
+            if (width <= 0 || height <= 0) return
+
+            val scale = min(width.toFloat() / bmp.width.toFloat(), height.toFloat() / bmp.height.toFloat())
+            val dispW = bmp.width * scale
+            val dispH = bmp.height * scale
+            val left = (width - dispW) / 2f
+            val top = (height - dispH) / 2f
+            imgRect.set(left, top, left + dispW, top + dispH)
+
+            val padX = dispW * 0.12f
+            val padY = dispH * 0.18f
+            cropRect.set(left + padX, top + padY, left + dispW - padX, top + dispH - padY)
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val bmp = srcBmp ?: return
+            canvas.drawBitmap(bmp, null, imgRect, null)
+
+            canvas.drawRect(imgRect.left, imgRect.top, imgRect.right, cropRect.top, shadePaint)
+            canvas.drawRect(imgRect.left, cropRect.bottom, imgRect.right, imgRect.bottom, shadePaint)
+            canvas.drawRect(imgRect.left, cropRect.top, cropRect.left, cropRect.bottom, shadePaint)
+            canvas.drawRect(cropRect.right, cropRect.top, imgRect.right, cropRect.bottom, shadePaint)
+
+            canvas.drawRect(cropRect, borderPaint)
+            val corners = listOf(
+                Pair(cropRect.left, cropRect.top),
+                Pair(cropRect.right, cropRect.top),
+                Pair(cropRect.right, cropRect.bottom),
+                Pair(cropRect.left, cropRect.bottom)
+            )
+            for ((cx, cy) in corners) {
+                canvas.drawCircle(cx, cy, 20f, handlePaint)
+                canvas.drawCircle(cx, cy, 20f, handleRingPaint)
+            }
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (srcBmp == null) return false
+            val x = event.x
+            val y = event.y
+            val hitR = 65f
+
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    activeHandle = when {
+                        abs(x - cropRect.left) < hitR && abs(y - cropRect.top) < hitR -> 1
+                        abs(x - cropRect.right) < hitR && abs(y - cropRect.top) < hitR -> 2
+                        abs(x - cropRect.right) < hitR && abs(y - cropRect.bottom) < hitR -> 3
+                        abs(x - cropRect.left) < hitR && abs(y - cropRect.bottom) < hitR -> 4
+                        cropRect.contains(x, y) -> 5
+                        else -> 0
+                    }
+                    lastX = x
+                    lastY = y
+                    return activeHandle != 0
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = x - lastX
+                    val dy = y - lastY
+                    val minSize = 80f
+                    when (activeHandle) {
+                        1 -> {
+                            cropRect.left = (cropRect.left + dx).coerceIn(imgRect.left, cropRect.right - minSize)
+                            cropRect.top = (cropRect.top + dy).coerceIn(imgRect.top, cropRect.bottom - minSize)
+                        }
+                        2 -> {
+                            cropRect.right = (cropRect.right + dx).coerceIn(cropRect.left + minSize, imgRect.right)
+                            cropRect.top = (cropRect.top + dy).coerceIn(imgRect.top, cropRect.bottom - minSize)
+                        }
+                        3 -> {
+                            cropRect.right = (cropRect.right + dx).coerceIn(cropRect.left + minSize, imgRect.right)
+                            cropRect.bottom = (cropRect.bottom + dy).coerceIn(cropRect.top + minSize, imgRect.bottom)
+                        }
+                        4 -> {
+                            cropRect.left = (cropRect.left + dx).coerceIn(imgRect.left, cropRect.right - minSize)
+                            cropRect.bottom = (cropRect.bottom + dy).coerceIn(cropRect.top + minSize, imgRect.bottom)
+                        }
+                        5 -> {
+                            val w = cropRect.width()
+                            val h = cropRect.height()
+                            val newL = (cropRect.left + dx).coerceIn(imgRect.left, imgRect.right - w)
+                            val newT = (cropRect.top + dy).coerceIn(imgRect.top, imgRect.bottom - h)
+                            cropRect.set(newL, newT, newL + w, newT + h)
+                        }
+                    }
+                    lastX = x
+                    lastY = y
+                    invalidate()
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    activeHandle = 0
+                }
+            }
+            return false
+        }
+
+        fun extractCroppedBitmap(): Bitmap {
+            val bmp = srcBmp ?: return Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888)
+            if (imgRect.width() <= 0f || imgRect.height() <= 0f) return bmp
+
+            val scaleX = bmp.width.toFloat() / imgRect.width()
+            val scaleY = bmp.height.toFloat() / imgRect.height()
+
+            val left = ((cropRect.left - imgRect.left) * scaleX).toInt().coerceIn(0, bmp.width - 10)
+            val top = ((cropRect.top - imgRect.top) * scaleY).toInt().coerceIn(0, bmp.height - 10)
+            val cropW = (cropRect.width() * scaleX).toInt().coerceIn(10, bmp.width - left)
+            val cropH = (cropRect.height() * scaleY).toInt().coerceIn(10, bmp.height - top)
+
+            return Bitmap.createBitmap(bmp, left, top, cropW, cropH)
+        }
+    }
+}
