@@ -36,12 +36,16 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
     private var isHindi = false
     private var currentSearchQuery = ""
     private var targetProjectFolderForScan: String? = null
+    @Volatile private var isBusyProcessing = false
+
+    private val bgExecutor = Executors.newSingleThreadExecutor()
 
     private lateinit var recentDocsContainer: LinearLayout
     private lateinit var tvAllDocsCount: TextView
@@ -80,14 +84,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Shield: FLAG_SECURE
+        // Security Point 1: FLAG_SECURE Shield against background screen capture & Recent Apps leak
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
         )
 
         setContentView(R.layout.activity_main)
-        migrateAllLegacyDocsToProjectFolders()
 
         recentDocsContainer = findViewById(R.id.recentDocsContainer)
         tvAllDocsCount = findViewById(R.id.tvAllDocsCount)
@@ -97,6 +100,15 @@ class MainActivity : AppCompatActivity() {
         tvTabDocs = findViewById(R.id.tvTabDocs)
         ivTabTools = findViewById(R.id.ivTabTools)
         tvTabTools = findViewById(R.id.tvTabTools)
+
+        // Background maintenance: Shred old temp cache files & migrate legacy files without blocking UI
+        bgExecutor.execute {
+            shredTemporaryCacheFiles()
+            migrateAllLegacyDocsToProjectFolders()
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) loadProjectFolders()
+            }
+        }
 
         findViewById<MaterialButton>(R.id.btnLangToggle).setOnClickListener {
             isHindi = !isHindi
@@ -108,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<MaterialCardView>(R.id.cardCamScan).setOnClickListener {
+            if (isBusyProcessing) return@setOnClickListener
             targetProjectFolderForScan = null
             startDocumentScanner()
         }
@@ -144,10 +157,31 @@ class MainActivity : AppCompatActivity() {
         loadProjectFolders()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        bgExecutor.shutdownNow()
+    }
+
+    // Security Point 2: Sandbox storage inside internal filesDir
     private fun getSecureProjectsRoot(): File {
         val dir = File(filesDir, "DocMitra/Projects")
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    // Security Fix: Automatically shred leftover unencrypted PDFs/images from cacheDir
+    private fun shredTemporaryCacheFiles() {
+        try {
+            val cutoff = System.currentTimeMillis() - (30 * 60 * 1000L) // Older than 30 mins
+            cacheDir.listFiles()?.forEach { file ->
+                if (file.isFile && (file.extension.equals("pdf", true) || file.extension.equals("jpg", true))) {
+                    if (file.lastModified() < cutoff) {
+                        file.delete()
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
     }
 
     private fun migrateAllLegacyDocsToProjectFolders() {
@@ -180,6 +214,7 @@ class MainActivity : AppCompatActivity() {
                             page.close()
                             val outJpg = File(projDir, String.format(Locale.US, "page_%04d.jpg", i + 1))
                             FileOutputStream(outJpg).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) }
+                            bmp.recycle()
                         }
                         renderer.close()
                         pfd.close()
@@ -349,7 +384,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
                 setBackgroundColor(0xFFF0FDF4.toInt())
                 setTextColor(0xFF14532D.toInt())
-                setOnClickListener { shareProjectAsPdf(projDir, pages) }
+                setOnClickListener { shareProjectAsPdfAsync(projDir, pages) }
             }
 
             val moreBtn = MaterialButton(this).apply {
@@ -401,7 +436,7 @@ class MainActivity : AppCompatActivity() {
                         startDocumentScanner()
                     }
                     2 -> promptRenameProject(projDir)
-                    3 -> shareProjectAsPdf(projDir, pages)
+                    3 -> shareProjectAsPdfAsync(projDir, pages)
                     4 -> {
                         projDir.deleteRecursively()
                         Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
@@ -412,6 +447,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // Security Point 3: Input validation against Path Traversal
     private fun promptRenameProject(projDir: File) {
         val input = EditText(this).apply {
             setText(projDir.name)
@@ -428,8 +464,9 @@ class MainActivity : AppCompatActivity() {
                     .trim()
                     .take(50)
                 if (newName.isNotEmpty()) {
-                    val dest = File(projDir.parentFile, newName)
-                    if (!dest.exists() && projDir.renameTo(dest)) {
+                    val canonicalRoot = getSecureProjectsRoot().canonicalFile
+                    val dest = File(canonicalRoot, newName).canonicalFile
+                    if (dest.parentFile == canonicalRoot && !dest.exists() && projDir.renameTo(dest)) {
                         Toast.makeText(this, "Saved as '$newName'", Toast.LENGTH_SHORT).show()
                         loadProjectFolders()
                     }
@@ -439,31 +476,47 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun shareProjectAsPdf(projDir: File, pages: List<File>) {
-        try {
-            val cachePdf = File(cacheDir, "${projDir.name}.pdf")
-            val pdfDoc = PdfDocument()
-            pages.forEachIndexed { idx, imgFile ->
-                val bmp = BitmapFactory.decodeFile(imgFile.absolutePath)
-                if (bmp != null) {
-                    val info = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, idx + 1).create()
-                    val page = pdfDoc.startPage(info)
-                    page.canvas.drawBitmap(bmp, 0f, 0f, null)
-                    pdfDoc.finishPage(page)
+    // Zero-ANR Background PDF Builder with memory recycling for 50+ pages
+    private fun shareProjectAsPdfAsync(projDir: File, pages: List<File>) {
+        if (isBusyProcessing) return
+        isBusyProcessing = true
+        Toast.makeText(this, "Building HD PDF...", Toast.LENGTH_SHORT).show()
+
+        bgExecutor.execute {
+            try {
+                val cachePdf = File(cacheDir, "${projDir.name}.pdf")
+                val pdfDoc = PdfDocument()
+                pages.forEachIndexed { idx, imgFile ->
+                    val bmp = BitmapFactory.decodeFile(imgFile.absolutePath)
+                    if (bmp != null) {
+                        val info = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, idx + 1).create()
+                        val page = pdfDoc.startPage(info)
+                        page.canvas.drawBitmap(bmp, 0f, 0f, null)
+                        pdfDoc.finishPage(page)
+                        bmp.recycle()
+                    }
+                }
+                FileOutputStream(cachePdf).use { out -> pdfDoc.writeTo(out) }
+                pdfDoc.close()
+
+                runOnUiThread {
+                    isBusyProcessing = false
+                    if (!isFinishing && !isDestroyed) {
+                        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", cachePdf)
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/pdf"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        startActivity(Intent.createChooser(intent, "Share HD PDF"))
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    isBusyProcessing = false
+                    Toast.makeText(this, "Share error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
-            FileOutputStream(cachePdf).use { out -> pdfDoc.writeTo(out) }
-            pdfDoc.close()
-
-            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", cachePdf)
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(intent, "Share HD PDF"))
-        } catch (e: Exception) {
-            Toast.makeText(this, "Share error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
