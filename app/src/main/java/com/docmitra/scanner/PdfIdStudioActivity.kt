@@ -37,6 +37,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import java.io.File
@@ -55,7 +57,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
     private var activeIdSide = 1 // 1 = Front, 2 = Back
     private var isSideBySide = false
     private var tempCameraFile: File? = null
-    private var cameraRequestPurpose = "ID_CARD" // "ID_CARD" or "IMG_TO_PDF"
+    private var cameraRequestPurpose = "ID_CARD"
 
     private lateinit var ivFrontPreview: ImageView
     private lateinit var ivBackPreview: ImageView
@@ -65,7 +67,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
     private val selectedImages = ArrayList<Bitmap>()
     private var selectedPdfUri: Uri? = null
 
-    // Runtime Camera Permission Launcher
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -76,7 +77,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
-    // Direct System Camera Launcher
     private val directCameraLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
@@ -96,7 +96,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
-    // Single Gallery Picker for ID Card Side
     private val singleGalleryPicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -108,7 +107,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
-    // Multi-Gallery Picker for Image to PDF
     private val multiImagePicker = registerForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris ->
@@ -135,7 +133,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Shield: FLAG_SECURE
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -149,6 +146,15 @@ class PdfIdStudioActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFF1F5F9.toInt())
+        }
+
+        // Hardware-level Safe Area Insets
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            WindowInsetsCompat.CONSUMED
         }
 
         val topBar = LinearLayout(this).apply {
@@ -241,7 +247,6 @@ class PdfIdStudioActivity : AppCompatActivity() {
             ).apply { bottomMargin = dp(10) }
         }
 
-        // Clean Card without cluttered camera buttons upfront; tapping card pops up Camera / Gallery chooser
         fun createSideCard(label: String, sideNum: Int): Pair<MaterialCardView, ImageView> {
             val card = MaterialCardView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(0, dp(145), 1f).apply {
