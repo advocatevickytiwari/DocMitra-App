@@ -21,6 +21,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -38,8 +39,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -113,26 +112,21 @@ class PhotoStudioActivity : AppCompatActivity() {
             setBackgroundColor(if (mode == "COMPRESS") 0xFFF1F5F9.toInt() else 0xFF0F172A.toInt())
         }
 
-        // Hardware-level Safe Area Insets
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
-            val insets = windowInsets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
-            )
-            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
-            WindowInsetsCompat.CONSUMED
-        }
-
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF14532D.toInt())
-            setPadding(dp(10), dp(10), dp(12), dp(10))
+            setPadding(dp(8), dp(8), dp(10), dp(8))
         }
 
         val btnBack = MaterialButton(this).apply {
             text = "←"
-            textSize = 16f
+            textSize = 18f
             minWidth = dp(40)
+            minimumWidth = dp(40)
+            insetTop = 0
+            insetBottom = 0
+            setPadding(0, 0, 0, 0)
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0x00000000)
             setOnClickListener { finish() }
@@ -151,7 +145,7 @@ class PhotoStudioActivity : AppCompatActivity() {
             setTextColor(0xFFFFFFFF.toInt())
             setHintTextColor(0xFFCBD5E1.toInt())
             setBackgroundColor(0x22FFFFFF)
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setPadding(dp(10), dp(7), dp(10), dp(7))
             isSingleLine = true
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginEnd = dp(8)
@@ -161,6 +155,11 @@ class PhotoStudioActivity : AppCompatActivity() {
         val btnPickDoc = MaterialButton(this).apply {
             text = "+ Open File"
             textSize = 12f
+            isAllCaps = false
+            maxLines = 1
+            insetTop = 0
+            insetBottom = 0
+            setPadding(dp(12), 0, dp(12), 0)
             setTypeface(null, Typeface.BOLD)
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0xFFEA580C.toInt())
@@ -179,6 +178,30 @@ class PhotoStudioActivity : AppCompatActivity() {
         }
 
         setContentView(root)
+    }
+
+    private fun makeCleanButton(
+        label: String,
+        bgColor: Int,
+        txtColor: Int,
+        txtSize: Float,
+        dp: (Int) -> Int
+    ): MaterialButton {
+        return MaterialButton(this).apply {
+            text = label
+            textSize = txtSize
+            isAllCaps = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            minWidth = 0
+            minimumWidth = 0
+            insetTop = 0
+            insetBottom = 0
+            setPadding(dp(6), 0, dp(6), 0)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(txtColor)
+            setBackgroundColor(bgColor)
+        }
     }
 
     private fun buildStampAndSignStudioUi(root: LinearLayout, dp: (Int) -> Int) {
@@ -210,60 +233,35 @@ class PhotoStudioActivity : AppCompatActivity() {
         stageFrame.addView(stampOverlay)
         root.addView(stageFrame)
 
+        // Stamp Scale & Fix Bar (Zero Clipping)
         stampSizeBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF1E293B.toInt())
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setPadding(dp(8), dp(6), dp(8), dp(6))
             visibility = View.GONE
         }
 
-        val btnSmaller = MaterialButton(this).apply {
-            text = "Size -"
-            textSize = 11.5f
-            minWidth = 0
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF334155.toInt())
+        val btnSmaller = makeCleanButton("Size -", 0xFF334155.toInt(), 0xFFFFFFFF.toInt(), 11.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(64), dp(38))
             setOnClickListener { stampOverlay.changeScale(-0.15f) }
         }
 
-        val btnBigger = MaterialButton(this).apply {
-            text = "Size +"
-            textSize = 11.5f
-            minWidth = 0
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF334155.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(6) }
+        val btnBigger = makeCleanButton("Size +", 0xFF334155.toInt(), 0xFFFFFFFF.toInt(), 11.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(64), dp(38)).apply { marginStart = dp(6) }
             setOnClickListener { stampOverlay.changeScale(0.15f) }
         }
 
-        val btnRemoveStamp = MaterialButton(this).apply {
-            text = "Remove"
-            textSize = 11f
-            minWidth = 0
-            setTextColor(0xFFFCA5A5.toInt())
-            setBackgroundColor(0x00000000)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(6) }
+        val btnRemoveStamp = makeCleanButton("Remove", 0xFF450A0A.toInt(), 0xFFFCA5A5.toInt(), 11.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(72), dp(38)).apply { marginStart = dp(6) }
             setOnClickListener {
                 stampOverlay.clear()
                 stampSizeBar.visibility = View.GONE
             }
         }
 
-        val btnFixOnPaper = MaterialButton(this).apply {
-            text = "✓ Fix on Paper"
-            textSize = 12f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFFEA580C.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(8)
-            }
+        val btnFixOnPaper = makeCleanButton("✓ Fix on Paper", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(6) }
             setOnClickListener { fixStampOntoPaper() }
         }
 
@@ -273,10 +271,11 @@ class PhotoStudioActivity : AppCompatActivity() {
         stampSizeBar.addView(btnFixOnPaper)
         root.addView(stampSizeBar)
 
+        // Bottom Studio Controls (Wide, non-clipped buttons)
         val bottomPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
-            setPadding(dp(12), dp(10), dp(12), dp(12))
+            setPadding(dp(10), dp(10), dp(10), dp(12))
         }
 
         val toolsRow = LinearLayout(this).apply {
@@ -287,30 +286,18 @@ class PhotoStudioActivity : AppCompatActivity() {
             ).apply { bottomMargin = dp(8) }
         }
 
-        val btnCustomMohar = MaterialButton(this).apply {
-            text = "🔏 Mohar (Seal)"
-            textSize = 11.5f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF14532D.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(5) }
+        val btnCustomMohar = makeCleanButton("🔏 Mohar", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(5) }
             setOnClickListener { showMoharMenu() }
         }
 
-        val btnDigitalSign = MaterialButton(this).apply {
-            text = "✍️ Signature"
-            textSize = 11.5f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF1E3A8A.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(5) }
+        val btnDigitalSign = makeCleanButton("✍️ Signature", 0xFF1E3A8A.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1.15f).apply { marginEnd = dp(5) }
             setOnClickListener { showSignatureMenu() }
         }
 
-        val btnSelfAttested = MaterialButton(this).apply {
-            text = "📋 Self Attested"
-            textSize = 11f
-            setTextColor(0xFF0F172A.toInt())
-            setBackgroundColor(0xFFE2E8F0.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f)
+        val btnSelfAttested = makeCleanButton("📋 Self Attest", 0xFFE2E8F0.toInt(), 0xFF0F172A.toInt(), 11.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1.05f)
             setOnClickListener {
                 val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
                 val bmp = createBoxStamp("SELF ATTESTED", "Date: $dateStr", Color.rgb(18, 56, 168))
@@ -327,23 +314,13 @@ class PhotoStudioActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
         }
 
-        val btnSavePaper = MaterialButton(this).apply {
-            text = "✓ Save (App + Gallery)"
-            textSize = 12.5f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF14532D.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(46), 1.2f).apply { marginEnd = dp(8) }
+        val btnSavePaper = makeCleanButton("✓ Save (App + Gallery)", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(46), 1.25f).apply { marginEnd = dp(8) }
             setOnClickListener { saveStampedDocument(sharePdf = false) }
         }
 
-        val btnSharePdf = MaterialButton(this).apply {
-            text = "Share PDF"
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFFEA580C.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, dp(46), 1f)
+        val btnSharePdf = makeCleanButton("Share PDF", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(46), 0.95f)
             setOnClickListener { saveStampedDocument(sharePdf = true) }
         }
 
@@ -357,31 +334,66 @@ class PhotoStudioActivity : AppCompatActivity() {
             eraseColor(Color.WHITE)
         }
         setLoadedBitmap(blankSheet)
-        Toast.makeText(this, "Tap '+ Open File' to load photo/PDF, or create Mohar/Sign below!", Toast.LENGTH_LONG).show()
+    }
+
+    private fun showCleanOptionSheet(title: String, options: List<String>, onSelect: (Int) -> Unit) {
+        val density = resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(16))
+        }
+
+        var dialog: AlertDialog? = null
+        options.forEachIndexed { idx, label ->
+            val btn = MaterialButton(this).apply {
+                text = label
+                textSize = 14f
+                isAllCaps = false
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setTextColor(0xFF0F172A.toInt())
+                setBackgroundColor(0xFFF1F5F9.toInt())
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(8) }
+                setOnClickListener {
+                    dialog?.dismiss()
+                    onSelect(idx)
+                }
+            }
+            container.addView(btn)
+        }
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.show()
     }
 
     private fun showDocumentSourceDialog() {
         val items = if (mode == "COMPRESS") {
-            arrayOf("📷 Take Photo with Camera", "🖼 Pick Photo from Gallery")
+            listOf("📷  Take Photo with Camera", "🖼  Pick Photo from Gallery")
         } else {
-            arrayOf("📷 Take Photo with Camera", "🖼 Pick Photo from Gallery", "📄 Pick PDF Page to Stamp")
+            listOf("📷  Take Photo with Camera", "🖼  Pick Photo from Gallery", "📄  Pick PDF Page to Stamp")
         }
-        AlertDialog.Builder(this)
-            .setTitle("Select Document")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> {
-                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                            openDirectCamera()
-                        } else {
-                            cameraPermLauncher.launch(Manifest.permission.CAMERA)
-                        }
+        showCleanOptionSheet("Select Document", items) { which ->
+            when (which) {
+                0 -> {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        openDirectCamera()
+                    } else {
+                        cameraPermLauncher.launch(Manifest.permission.CAMERA)
                     }
-                    1 -> galleryImageLauncher.launch("image/*")
-                    2 -> pdfFirstPageLauncher.launch("application/pdf")
                 }
+                1 -> galleryImageLauncher.launch("image/*")
+                2 -> pdfFirstPageLauncher.launch("application/pdf")
             }
-            .show()
+        }
     }
 
     private fun openDirectCamera() {
@@ -428,44 +440,59 @@ class PhotoStudioActivity : AppCompatActivity() {
     private fun showMoharMenu() {
         val savedMohar = File(getStampsDir(), "saved_mohar.png")
         val opts = ArrayList<String>()
-        if (savedMohar.exists()) opts.add("📌 Use Saved Mohar")
-        opts.add("🔏 Create New Round / Box Mohar")
-        opts.add("⚖️ 'CERTIFIED TRUE COPY' Stamp")
+        if (savedMohar.exists()) opts.add("📌  Use Saved Mohar")
+        opts.add("🔏  Create New Round / Box Mohar")
+        opts.add("⚖️  'CERTIFIED TRUE COPY' Stamp")
 
-        AlertDialog.Builder(this)
-            .setTitle("Mohar / Office Seal")
-            .setItems(opts.toTypedArray()) { _, which ->
-                val sel = opts[which]
-                when {
-                    sel.contains("Use Saved") -> {
-                        BitmapFactory.decodeFile(savedMohar.absolutePath)?.let { placeStamp(it) }
-                    }
-                    sel.contains("Create New") -> promptNewMohar(savedMohar)
-                    sel.contains("CERTIFIED") -> {
-                        val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-                        placeStamp(createBoxStamp("CERTIFIED TRUE COPY", "Verified • $dateStr", Color.rgb(185, 28, 28)))
-                    }
+        showCleanOptionSheet("Mohar / Office Seal", opts) { which ->
+            val sel = opts[which]
+            when {
+                sel.contains("Use Saved") -> {
+                    BitmapFactory.decodeFile(savedMohar.absolutePath)?.let { placeStamp(it) }
+                }
+                sel.contains("Create New") -> promptNewMohar(savedMohar)
+                sel.contains("CERTIFIED") -> {
+                    val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+                    placeStamp(createBoxStamp("CERTIFIED TRUE COPY", "Verified • $dateStr", Color.rgb(185, 28, 28)))
                 }
             }
-            .show()
+        }
     }
 
     private fun promptNewMohar(saveFile: File) {
+        val density = resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
+
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(40, 24, 40, 10)
+            setPadding(dp(18), dp(14), dp(18), dp(8))
         }
-        val et1 = EditText(this).apply { hint = "Top Text (e.g. ADV. VICKY TIWARI)" }
-        val et2 = EditText(this).apply { hint = "Center Title (e.g. ADVOCATE)" }
-        val et3 = EditText(this).apply { hint = "Bottom Text (e.g. HIGH COURT LUCKNOW)" }
+        val et1 = EditText(this).apply {
+            hint = "Top Line (e.g. ADV. VICKY TIWARI)"
+            isSingleLine = true
+        }
+        val et2 = EditText(this).apply {
+            hint = "Center Title (e.g. ADVOCATE)"
+            isSingleLine = true
+        }
+        val et3 = EditText(this).apply {
+            hint = "Bottom Line (e.g. HIGH COURT LUCKNOW)"
+            isSingleLine = true
+        }
         box.addView(et1)
         box.addView(et2)
         box.addView(et3)
 
-        AlertDialog.Builder(this)
-            .setTitle("Create Custom Mohar")
-            .setView(box)
-            .setPositiveButton("Round Mohar (Blue)") { _, _ ->
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(10), 0, 0)
+        }
+
+        var dlg: AlertDialog? = null
+
+        val btnRound = makeCleanButton("Round Mohar", 0xFF1E3A8A.toInt(), 0xFFFFFFFF.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) }
+            setOnClickListener {
                 val bmp = createRoundMohar(
                     et1.text.toString().trim().ifEmpty { "AUTHORIZED SEAL" },
                     et2.text.toString().trim().ifEmpty { "VERIFIED" },
@@ -473,9 +500,14 @@ class PhotoStudioActivity : AppCompatActivity() {
                     Color.rgb(20, 62, 175)
                 )
                 FileOutputStream(saveFile).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                dlg?.dismiss()
                 placeStamp(bmp)
             }
-            .setNeutralButton("Box Mohar (Blue)") { _, _ ->
+        }
+
+        val btnBox = makeCleanButton("Box Mohar", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f)
+            setOnClickListener {
                 val sub = listOf(et2.text.toString().trim(), et3.text.toString().trim())
                     .filter { it.isNotEmpty() }.joinToString(" | ")
                 val bmp = createBoxStamp(
@@ -484,49 +516,91 @@ class PhotoStudioActivity : AppCompatActivity() {
                     Color.rgb(20, 62, 175)
                 )
                 FileOutputStream(saveFile).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                dlg?.dismiss()
                 placeStamp(bmp)
             }
+        }
+
+        btnRow.addView(btnRound)
+        btnRow.addView(btnBox)
+        box.addView(btnRow)
+
+        dlg = AlertDialog.Builder(this)
+            .setTitle("Create Custom Mohar")
+            .setView(box)
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        dlg.show()
     }
 
     private fun showSignatureMenu() {
         val savedSign = File(getStampsDir(), "saved_sign.png")
         val opts = ArrayList<String>()
-        if (savedSign.exists()) opts.add("🖊️ Use Saved Signature")
-        opts.add("✍️ Draw New Signature")
+        if (savedSign.exists()) opts.add("🖊️  Use Saved Signature")
+        opts.add("✍️  Draw New Signature")
 
-        AlertDialog.Builder(this)
-            .setTitle("Digital Signature")
-            .setItems(opts.toTypedArray()) { _, which ->
-                if (opts[which].contains("Use Saved")) {
-                    BitmapFactory.decodeFile(savedSign.absolutePath)?.let { placeStamp(it) }
-                } else {
-                    promptDrawSign(savedSign)
-                }
+        showCleanOptionSheet("Digital Signature", opts) { which ->
+            if (opts[which].contains("Use Saved")) {
+                BitmapFactory.decodeFile(savedSign.absolutePath)?.let { placeStamp(it) }
+            } else {
+                promptDrawSign(savedSign)
             }
-            .show()
+        }
     }
 
     private fun promptDrawSign(saveFile: File) {
+        val density = resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
+
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(8))
+        }
+
         val pad = FingerSignPad(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                (180 * resources.displayMetrics.density).toInt()
+                dp(190)
             )
         }
-        AlertDialog.Builder(this)
-            .setTitle("Sign with Finger")
-            .setView(pad)
-            .setPositiveButton("Save & Apply") { _, _ ->
+
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(10), 0, 0)
+        }
+
+        var dlg: AlertDialog? = null
+
+        val btnClear = makeCleanButton("Clear Pad", 0xFFE2E8F0.toInt(), 0xFF0F172A.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) }
+            setOnClickListener { pad.clearPad() }
+        }
+
+        val btnApply = makeCleanButton("✓ Save & Apply", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1.3f)
+            setOnClickListener {
                 val bmp = pad.exportSignBitmap()
                 if (bmp != null) {
                     FileOutputStream(saveFile).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                    dlg?.dismiss()
                     placeStamp(bmp)
+                } else {
+                    Toast.makeText(this@PhotoStudioActivity, "Please sign on pad first", Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+
+        btnRow.addView(btnClear)
+        btnRow.addView(btnApply)
+        wrapper.addView(pad)
+        wrapper.addView(btnRow)
+
+        dlg = AlertDialog.Builder(this)
+            .setTitle("Sign with Finger")
+            .setView(wrapper)
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        dlg.show()
     }
 
     private fun placeStamp(bmp: Bitmap) {
@@ -646,11 +720,7 @@ class PhotoStudioActivity : AppCompatActivity() {
         }
         body.addView(sbQuality)
 
-        val btnSaveCompressed = MaterialButton(this).apply {
-            text = "Save Compressed Photo to Gallery"
-            textSize = 14f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF14532D.toInt())
+        val btnSaveCompressed = makeCleanButton("Save Compressed Photo to Gallery", 0xFF14532D.toInt(), 0xFFFFFFFF.toInt(), 14f, dp).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
             setOnClickListener {
                 val bmp = baseBitmap ?: return@setOnClickListener
@@ -670,8 +740,8 @@ class PhotoStudioActivity : AppCompatActivity() {
     }
 
     private fun createBoxStamp(title: String, sub: String, ink: Int): Bitmap {
-        val w = 520
-        val h = 170
+        val w = 560
+        val h = 180
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val pBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -680,196 +750,52 @@ class PhotoStudioActivity : AppCompatActivity() {
             strokeWidth = 7f
         }
         c.drawRoundRect(RectF(8f, 8f, w - 8f, h - 8f), 14f, 14f, pBorder)
+
+        val titleSize = if (title.length > 20) 27f else 34f
         val pTitle = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ink
-            textSize = 35f
+            textSize = titleSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
+        val subSize = if (sub.length > 28) 18f else 22f
         val pSub = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ink
-            textSize = 22f
+            textSize = subSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
         if (sub.isEmpty()) c.drawText(title, w / 2f, h / 2f + 12f, pTitle)
         else {
-            c.drawText(title, w / 2f, 74f, pTitle)
-            c.drawText(sub, w / 2f, 124f, pSub)
+            c.drawText(title, w / 2f, 76f, pTitle)
+            c.drawText(sub, w / 2f, 128f, pSub)
         }
         return bmp
     }
 
     private fun createRoundMohar(topTxt: String, midTxt: String, botTxt: String, ink: Int): Bitmap {
-        val size = 380
+        val size = 420
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val cx = size / 2f
         val cy = size / 2f
         val pOuter = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; style = Paint.Style.STROKE; strokeWidth = 8f }
         val pInner = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink; style = Paint.Style.STROKE; strokeWidth = 3.5f }
-        c.drawCircle(cx, cy, 174f, pOuter)
-        c.drawCircle(cx, cy, 162f, pInner)
-        c.drawCircle(cx, cy, 108f, pInner)
+        c.drawCircle(cx, cy, 192f, pOuter)
+        c.drawCircle(cx, cy, 178f, pInner)
+        c.drawCircle(cx, cy, 118f, pInner)
 
-        val pArc = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val topSize = if (topTxt.length > 18) 20f else 24f
+        val pArcTop = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ink
-            textSize = 24f
+            textSize = topSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
-        val topArc = Path().apply { addArc(RectF(cx - 132f, cy - 132f, cx + 132f, cy + 132f), 190f, 160f) }
-        c.drawTextOnPath(topTxt.uppercase(Locale.getDefault()), topArc, 0f, 0f, pArc)
+        val topArc = Path().apply { addArc(RectF(cx - 146f, cy - 146f, cx + 146f, cy + 146f), 190f, 160f) }
+        c.drawTextOnPath(topTxt.uppercase(Locale.getDefault()), topArc, 0f, 0f, pArcTop)
 
-        val botArc = Path().apply { addArc(RectF(cx - 138f, cy - 138f, cx + 138f, cy + 138f), 165f, -150f) }
-        c.drawTextOnPath(botTxt.uppercase(Locale.getDefault()), botArc, 0f, 0f, pArc)
-
-        val pMid = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val botSize = if (botTxt.length > 18) 19f else 23f
+        val pArcBot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = ink
-            textSize = 26f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-        }
-        c.drawText("★ $midTxt ★", cx, cy + 9f, pMid)
-        return bmp
-    }
-
-    private fun decodeScaledFile(file: File, maxDim: Int): Bitmap? {
-        return try {
-            val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, b)
-            var s = 1
-            while (b.outWidth / s > maxDim || b.outHeight / s > maxDim) s *= 2
-            BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = s })
-        } catch (_: Exception) { null }
-    }
-
-    private fun decodeScaledUri(uri: Uri, maxDim: Int): Bitmap? {
-        return try {
-            val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, b) }
-            var s = 1
-            while (b.outWidth / s > maxDim || b.outHeight / s > maxDim) s *= 2
-            contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
-            }
-        } catch (_: Exception) { null }
-    }
-
-    private fun saveToGallery(bmp: Bitmap, name: String) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocMitra")
-                }
-                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                uri?.let { contentResolver.openOutputStream(it)?.use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) } }
-            } else {
-                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "DocMitra")
-                if (!dir.exists()) dir.mkdirs()
-                FileOutputStream(File(dir, name)).use { out -> bmp.compress(Bitmap.CompressFormat.JPEG, 95, out) }
-            }
-        } catch (_: Exception) {}
-    }
-
-    private class MovableStampView(context: Context) : View(context) {
-        var currentStamp: Bitmap? = null
-        var posX = 120f
-        var posY = 260f
-        var scaleVal = 0.65f
-        private var lastX = 0f
-        private var lastY = 0f
-        private var dragging = false
-        private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFFEA580C.toInt()
-            style = Paint.Style.STROKE
-            strokeWidth = 3f
-        }
-
-        fun applyStamp(bmp: Bitmap) {
-            currentStamp = bmp
-            val vw = if (width > 0) width.toFloat() else 800f
-            val vh = if (height > 0) height.toFloat() else 1000f
-            scaleVal = (vw * 0.42f / bmp.width.coerceAtLeast(1)).coerceIn(0.25f, 1.2f)
-            posX = (vw - bmp.width * scaleVal) / 2f
-            posY = (vh - bmp.height * scaleVal) / 2f
-            invalidate()
-        }
-
-        fun changeScale(delta: Float) {
-            scaleVal = (scaleVal + delta).coerceIn(0.2f, 2.0f)
-            invalidate()
-        }
-
-        fun clear() {
-            currentStamp = null
-            invalidate()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val bmp = currentStamp ?: return
-            val dest = RectF(posX, posY, posX + bmp.width * scaleVal, posY + bmp.height * scaleVal)
-            canvas.drawBitmap(bmp, null, dest, null)
-            canvas.drawRect(dest, boxPaint)
-        }
-
-        override fun onTouchEvent(event: MotionEvent): Boolean {
-            val bmp = currentStamp ?: return false
-            val w = bmp.width * scaleVal
-            val h = bmp.height * scaleVal
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    if (event.x >= posX - 30f && event.x <= posX + w + 30f &&
-                        event.y >= posY - 30f && event.y <= posY + h + 30f) {
-                        dragging = true
-                        lastX = event.x
-                        lastY = event.y
-                        return true
-                    }
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (dragging) {
-                        posX += event.x - lastX
-                        posY += event.y - lastY
-                        lastX = event.x
-                        lastY = event.y
-                        invalidate()
-                        return true
-                    }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = false
-            }
-            return false
-        }
-    }
-
-    private class FingerSignPad(context: Context) : View(context) {
-        private val signPath = Path()
-        private var drawn = false
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(15, 45, 150)
-            style = Paint.Style.STROKE
-            strokeWidth = 9f
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-        }
-        init { setBackgroundColor(0xFFF8FAFC.toInt()) }
-        override fun onDraw(canvas: Canvas) { super.onDraw(canvas); canvas.drawPath(signPath, paint) }
-        override fun onTouchEvent(event: MotionEvent): Boolean {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> { signPath.moveTo(event.x, event.y); drawn = true; invalidate(); return true }
-                MotionEvent.ACTION_MOVE -> { signPath.lineTo(event.x, event.y); invalidate(); return true }
-            }
-            return true
-        }
-        fun exportSignBitmap(): Bitmap? {
-            if (!drawn || width <= 0 || height <= 0) return null
-            val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            Canvas(bmp).drawPath(signPath, paint)
-            return bmp
-        }
-    }
-}
+            text
