@@ -38,6 +38,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -96,7 +98,6 @@ class PhotoStudioActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Shield: FLAG_SECURE
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -112,7 +113,15 @@ class PhotoStudioActivity : AppCompatActivity() {
             setBackgroundColor(if (mode == "COMPRESS") 0xFFF1F5F9.toInt() else 0xFF0F172A.toInt())
         }
 
-        // Top Bar
+        // Hardware-level Safe Area Insets
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
+
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -172,8 +181,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         setContentView(root)
     }
 
-    // ==================== 1. DEDICATED SIGNATURE & STAMP STUDIO ====================
-
     private fun buildStampAndSignStudioUi(root: LinearLayout, dp: (Int) -> Int) {
         val stageFrame = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -203,7 +210,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         stageFrame.addView(stampOverlay)
         root.addView(stageFrame)
 
-        // Stamp Scale & Fix Bar
         stampSizeBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -267,7 +273,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         stampSizeBar.addView(btnFixOnPaper)
         root.addView(stampSizeBar)
 
-        // Bottom Studio Controls
         val bottomPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -348,7 +353,6 @@ class PhotoStudioActivity : AppCompatActivity() {
 
         root.addView(bottomPanel)
 
-        // Start with a clean white A4 blank sheet so user can also test/create Mohar & Sign immediately, or open any file
         val blankSheet = Bitmap.createBitmap(1240, 1754, Bitmap.Config.ARGB_8888).apply {
             eraseColor(Color.WHITE)
         }
@@ -606,8 +610,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         }
     }
 
-    // ==================== 2. PHOTO COMPRESS (KB) MODE ====================
-
     private fun buildCompressModeUi(root: LinearLayout, dp: (Int) -> Int) {
         val scroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -666,8 +668,6 @@ class PhotoStudioActivity : AppCompatActivity() {
         scroll.addView(body)
         root.addView(scroll)
     }
-
-    // ==================== HELPERS & CUSTOM VIEWS ====================
 
     private fun createBoxStamp(title: String, sub: String, ink: Int): Bitmap {
         val w = 520
