@@ -39,7 +39,6 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.max
 import kotlin.math.min
 
 class ScanPreviewActivity : AppCompatActivity() {
@@ -69,7 +68,7 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         val secureBaseDir = getSecureProjectsRoot()
 
-        // Path Traversal Guard for Project Folder
+        // Path Traversal Guard
         val rawFolderPath = intent.getStringExtra("TARGET_PROJECT_DIR")
         if (!rawFolderPath.isNullOrBlank()) {
             try {
@@ -91,7 +90,6 @@ class ScanPreviewActivity : AppCompatActivity() {
             setBackgroundColor(0xFF0F172A.toInt())
         }
 
-        // Top Bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -155,7 +153,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         topBar.addView(btnNextPage)
         root.addView(topBar)
 
-        // Preview Stage with Interactive Stamp/Sign Overlay
         val stageFrame = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -186,7 +183,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         stageFrame.addView(overlayView)
         root.addView(stageFrame)
 
-        // Active Stamp Size/Apply Bar (Shown when a Stamp or Sign is placed)
         stampControlsBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -250,7 +246,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         stampControlsBar.addView(btnFixStamp)
         root.addView(stampControlsBar)
 
-        // Bottom Controls Panel
         val controlsPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFFFFFFF.toInt())
@@ -317,7 +312,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         controlsPanel.addView(brightRow)
         controlsPanel.addView(contrastRow)
 
-        // Action Row: Mohar/Sign | Done & Save | Share PDF
         val actionRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(6), 0, 0)
@@ -363,7 +357,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         root.addView(controlsPanel)
         setContentView(root)
 
-        // Load Images Safely (content:// scheme only)
         val uriStrings = ArrayList<String>()
         intent.getStringArrayListExtra("SCAN_URIS")?.let { uriStrings.addAll(it) }
 
@@ -557,8 +550,6 @@ class ScanPreviewActivity : AppCompatActivity() {
         return out
     }
 
-    // ==================== CUSTOM MOHAR / STAMP & E-SIGN ENGINE ====================
-
     private fun openStampAndSignMenu() {
         val assetsDir = getSecureVaultAssetsDir()
         val savedMoharFile = File(assetsDir, "saved_mohar.png")
@@ -670,16 +661,15 @@ class ScanPreviewActivity : AppCompatActivity() {
     }
 
     private fun placeStampOnOverlay(stampBmp: Bitmap) {
-        overlayView.setStampBitmap(stampBmp)
+        overlayView.applyStampBitmap(stampBmp)
         stampControlsBar.visibility = View.VISIBLE
         Toast.makeText(this, "Drag Mohar/Sign anywhere on page, then tap '✓ Fix on Page'", Toast.LENGTH_LONG).show()
     }
 
     private fun burnStampOntoCurrentPage() {
-        val stampBmp = overlayView.stampBitmap ?: return
+        val stampBmp = overlayView.activeStamp ?: return
         val basePage = editedBitmaps[currentIndex]
 
-        // Map overlay coordinates precisely onto underlying page bitmap
         val viewW = ivPreview.width.toFloat()
         val viewH = ivPreview.height.toFloat()
         val bmpW = basePage.width.toFloat()
@@ -798,11 +788,9 @@ class ScanPreviewActivity : AppCompatActivity() {
         return bmp
     }
 
-    // ==================== SAVE TO HD PROJECT FOLDER ====================
-
     private fun saveProjectFolderAndFinish(shareImmediately: Boolean) {
         try {
-            if (overlayView.stampBitmap != null) {
+            if (overlayView.activeStamp != null) {
                 burnStampOntoCurrentPage()
             }
 
@@ -911,9 +899,8 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
     }
 
-    // Draggable Stamp/Signature Overlay View
     private class StampOverlayView(context: Context) : View(context) {
-        var stampBitmap: Bitmap? = null
+        var activeStamp: Bitmap? = null
         var stampX = 120f
         var stampY = 260f
         var stampScale = 0.65f
@@ -927,11 +914,13 @@ class ScanPreviewActivity : AppCompatActivity() {
             strokeWidth = 3f
         }
 
-        fun setStampBitmap(bmp: Bitmap) {
-            stampBitmap = bmp
-            stampScale = (width * 0.42f / bmp.width.coerceAtLeast(1)).coerceIn(0.25f, 1.2f)
-            stampX = (width - bmp.width * stampScale) / 2f
-            stampY = (height - bmp.height * stampScale) / 2f
+        fun applyStampBitmap(bmp: Bitmap) {
+            activeStamp = bmp
+            val viewW = if (width > 0) width.toFloat() else 800f
+            val viewH = if (height > 0) height.toFloat() else 1000f
+            stampScale = (viewW * 0.42f / bmp.width.coerceAtLeast(1)).coerceIn(0.25f, 1.2f)
+            stampX = (viewW - bmp.width * stampScale) / 2f
+            stampY = (viewH - bmp.height * stampScale) / 2f
             invalidate()
         }
 
@@ -941,13 +930,13 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         fun clearStamp() {
-            stampBitmap = null
+            activeStamp = null
             invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val bmp = stampBitmap ?: return
+            val bmp = activeStamp ?: return
             val dest = RectF(
                 stampX,
                 stampY,
@@ -959,14 +948,14 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
-            val bmp = stampBitmap ?: return false
+            val bmp = activeStamp ?: return false
             val w = bmp.width * stampScale
             val h = bmp.height * stampScale
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    if (event.x in (stampX - 30f)..(stampX + w + 30f) &&
-                        event.y in (stampY - 30f)..(stampY + h + 30f)
+                    if (event.x >= (stampX - 30f) && event.x <= (stampX + w + 30f) &&
+                        event.y >= (stampY - 30f) && event.y <= (stampY + h + 30f)
                     ) {
                         isDragging = true
                         lastTouchX = event.x
@@ -992,11 +981,10 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
     }
 
-    // Finger Signature Drawing Pad
     private class SignatureDrawView(context: Context) : View(context) {
-        private val path = Path()
+        private val signPath = Path()
         private var hasStrokes = false
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val signPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(15, 45, 150)
             style = Paint.Style.STROKE
             strokeWidth = 9f
@@ -1010,19 +998,19 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            canvas.drawPath(path, paint)
+            canvas.drawPath(signPath, signPaint)
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    path.moveTo(event.x, event.y)
+                    signPath.moveTo(event.x, event.y)
                     hasStrokes = true
                     invalidate()
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    path.lineTo(event.x, event.y)
+                    signPath.lineTo(event.x, event.y)
                     invalidate()
                     return true
                 }
@@ -1034,7 +1022,7 @@ class ScanPreviewActivity : AppCompatActivity() {
             if (!hasStrokes || width <= 0 || height <= 0) return null
             val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
-            canvas.drawPath(path, paint)
+            canvas.drawPath(signPath, signPaint)
             return bmp
         }
     }
