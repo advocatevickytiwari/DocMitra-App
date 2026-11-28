@@ -1,8 +1,10 @@
 package com.docmitra.scanner
 
+import android.Manifest
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -33,6 +35,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -49,9 +52,10 @@ class PdfIdStudioActivity : AppCompatActivity() {
     private var mode = "ID_MERGE"
     private var frontBitmap: Bitmap? = null
     private var backBitmap: Bitmap? = null
-    private var activeIdSide = 1
+    private var activeIdSide = 1 // 1 = Front, 2 = Back
     private var isSideBySide = false
     private var tempCameraFile: File? = null
+    private var cameraRequestPurpose = "ID_CARD" // "ID_CARD" or "IMG_TO_PDF"
 
     private lateinit var ivFrontPreview: ImageView
     private lateinit var ivBackPreview: ImageView
@@ -61,19 +65,38 @@ class PdfIdStudioActivity : AppCompatActivity() {
     private val selectedImages = ArrayList<Bitmap>()
     private var selectedPdfUri: Uri? = null
 
+    // Runtime Camera Permission Launcher
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchDirectCameraInternal()
+        } else {
+            Toast.makeText(this, "Camera permission required to take photo", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Direct System Camera Launcher
     private val directCameraLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
         val camFile = tempCameraFile
-        if (success && camFile != null && camFile.exists()) {
+        if (success && camFile != null && camFile.exists() && camFile.length() > 0) {
             val rawBmp = decodeSafeFileBitmap(camFile, 2000)
             camFile.delete()
             if (rawBmp != null) {
-                openInteractiveCropDialog(rawBmp)
+                if (cameraRequestPurpose == "IMG_TO_PDF") {
+                    selectedImages.add(rawBmp)
+                    ivMergedPreview.setImageBitmap(rawBmp)
+                    Toast.makeText(this, "Total ${selectedImages.size} photo(s) added", Toast.LENGTH_SHORT).show()
+                } else {
+                    openInteractiveCropDialog(rawBmp)
+                }
             }
         }
     }
 
+    // Single Gallery Picker for ID Card Side
     private val singleGalleryPicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -85,17 +108,17 @@ class PdfIdStudioActivity : AppCompatActivity() {
         }
     }
 
+    // Multi-Gallery Picker for Image to PDF
     private val multiImagePicker = registerForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         if (!uris.isNullOrEmpty()) {
-            selectedImages.clear()
             for (u in uris.take(30)) {
                 decodeSafeUriBitmap(u, 1800)?.let { selectedImages.add(it) }
             }
             if (selectedImages.isNotEmpty()) {
-                ivMergedPreview.setImageBitmap(selectedImages[0])
-                Toast.makeText(this, "${selectedImages.size} photo(s) selected", Toast.LENGTH_SHORT).show()
+                ivMergedPreview.setImageBitmap(selectedImages.last())
+                Toast.makeText(this, "Total ${selectedImages.size} photo(s) ready", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -218,9 +241,10 @@ class PdfIdStudioActivity : AppCompatActivity() {
             ).apply { bottomMargin = dp(10) }
         }
 
+        // Clean Card without cluttered camera buttons upfront; tapping card pops up Camera / Gallery chooser
         fun createSideCard(label: String, sideNum: Int): Pair<MaterialCardView, ImageView> {
             val card = MaterialCardView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                layoutParams = LinearLayout.LayoutParams(0, dp(145), 1f).apply {
                     if (sideNum == 1) marginEnd = dp(6) else marginStart = dp(6)
                 }
                 radius = 12f * density
@@ -248,60 +272,32 @@ class PdfIdStudioActivity : AppCompatActivity() {
             val iv = ImageView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    dp(95)
+                    0,
+                    1f
                 )
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setBackgroundColor(0xFFF8FAFC.toInt())
-                setImageResource(android.R.drawable.ic_menu_report_image)
-                setOnClickListener {
-                    val existing = if (sideNum == 1) frontBitmap else backBitmap
-                    if (existing != null) {
-                        activeIdSide = sideNum
-                        openInteractiveCropDialog(existing)
-                    }
-                }
+                setImageResource(android.R.drawable.ic_menu_add)
             }
 
-            val btnRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, dp(6), 0, 0)
+            val tvTapHint = TextView(this).apply {
+                text = "Tap to Add / Crop"
+                textSize = 11f
+                setTextColor(0xFFEA580C.toInt())
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(0, dp(4), 0, 0)
             }
-
-            val btnCam = MaterialButton(this).apply {
-                text = "📷 Cam"
-                textSize = 10.5f
-                minWidth = 0
-                setPadding(dp(4), 0, dp(4), 0)
-                setTextColor(0xFFFFFFFF.toInt())
-                setBackgroundColor(0xFFEA580C.toInt())
-                layoutParams = LinearLayout.LayoutParams(0, dp(34), 1f).apply { marginEnd = dp(4) }
-                setOnClickListener {
-                    activeIdSide = sideNum
-                    launchDirectCamera()
-                }
-            }
-
-            val btnGal = MaterialButton(this).apply {
-                text = "🖼 Gal"
-                textSize = 10.5f
-                minWidth = 0
-                setPadding(dp(4), 0, dp(4), 0)
-                setTextColor(0xFFFFFFFF.toInt())
-                setBackgroundColor(0xFF14532D.toInt())
-                layoutParams = LinearLayout.LayoutParams(0, dp(34), 1f)
-                setOnClickListener {
-                    activeIdSide = sideNum
-                    singleGalleryPicker.launch("image/*")
-                }
-            }
-
-            btnRow.addView(btnCam)
-            btnRow.addView(btnGal)
 
             col.addView(tvHeader)
             col.addView(iv)
-            col.addView(btnRow)
+            col.addView(tvTapHint)
             card.addView(col)
+
+            card.setOnClickListener {
+                activeIdSide = sideNum
+                showIdSideSourcePopup()
+            }
             return Pair(card, iv)
         }
 
@@ -396,7 +392,38 @@ class PdfIdStudioActivity : AppCompatActivity() {
         refreshIdMergedPreview()
     }
 
-    private fun launchDirectCamera() {
+    private fun showIdSideSourcePopup() {
+        val existing = if (activeIdSide == 1) frontBitmap else backBitmap
+        val options = if (existing != null) {
+            arrayOf("📷 Take Photo with Camera", "🖼 Choose from Gallery", "✂️ Re-Crop Current Photo")
+        } else {
+            arrayOf("📷 Take Photo with Camera", "🖼 Choose from Gallery")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(if (activeIdSide == 1) "FRONT Side Options" else "BACK Side Options")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        cameraRequestPurpose = "ID_CARD"
+                        checkCameraPermissionAndOpen()
+                    }
+                    1 -> singleGalleryPicker.launch("image/*")
+                    2 -> existing?.let { openInteractiveCropDialog(it) }
+                }
+            }
+            .show()
+    }
+
+    private fun checkCameraPermissionAndOpen() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            launchDirectCameraInternal()
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun launchDirectCameraInternal() {
         try {
             val file = File(cacheDir, "id_cam_${System.currentTimeMillis()}.jpg")
             tempCameraFile = file
@@ -552,14 +579,14 @@ class PdfIdStudioActivity : AppCompatActivity() {
                 drawBitmapFitInsideSlot(canvas, frontBitmap!!, slot1, imgPaint)
             } else {
                 canvas.drawRect(slot1, guidePaint)
-                canvas.drawText("1. FRONT SIDE (Tap Cam or Gal)", pageW / 2f, top1 + maxSlotH / 2f, placeholderPaint)
+                canvas.drawText("1. FRONT SIDE (Tap Box 1 Above)", pageW / 2f, top1 + maxSlotH / 2f, placeholderPaint)
             }
 
             if (backBitmap != null) {
                 drawBitmapFitInsideSlot(canvas, backBitmap!!, slot2, imgPaint)
             } else {
                 canvas.drawRect(slot2, guidePaint)
-                canvas.drawText("2. BACK SIDE (Tap Cam or Gal)", pageW / 2f, top2 + maxSlotH / 2f, placeholderPaint)
+                canvas.drawText("2. BACK SIDE (Tap Box 2 Above)", pageW / 2f, top2 + maxSlotH / 2f, placeholderPaint)
             }
         } else {
             val maxSlotW = 540f
@@ -635,8 +662,8 @@ class PdfIdStudioActivity : AppCompatActivity() {
     }
 
     private fun buildImageToPdfUi(body: LinearLayout, dp: (Int) -> Int) {
-        val btnSelect = MaterialButton(this).apply {
-            text = "Select Photos from Gallery"
+        val btnAddPhotos = MaterialButton(this).apply {
+            text = "+ Add Photos (Camera / Gallery)"
             textSize = 14f
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0xFFEA580C.toInt())
@@ -644,9 +671,21 @@ class PdfIdStudioActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(48)
             ).apply { bottomMargin = dp(12) }
-            setOnClickListener { multiImagePicker.launch("image/*") }
+            setOnClickListener {
+                AlertDialog.Builder(this@PdfIdStudioActivity)
+                    .setTitle("Add Photos to PDF")
+                    .setItems(arrayOf("📷 Take Photo with Camera", "🖼 Choose from Gallery")) { _, which ->
+                        if (which == 0) {
+                            cameraRequestPurpose = "IMG_TO_PDF"
+                            checkCameraPermissionAndOpen()
+                        } else {
+                            multiImagePicker.launch("image/*")
+                        }
+                    }
+                    .show()
+            }
         }
-        body.addView(btnSelect)
+        body.addView(btnAddPhotos)
 
         ivMergedPreview = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -669,7 +708,7 @@ class PdfIdStudioActivity : AppCompatActivity() {
             )
             setOnClickListener {
                 if (selectedImages.isEmpty()) {
-                    Toast.makeText(this@PdfIdStudioActivity, "Please select photos first", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@PdfIdStudioActivity, "Please add photos first", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
                 val cleanName = sanitizeName(etFileName.text.toString(), "DocMitra_PDF")
