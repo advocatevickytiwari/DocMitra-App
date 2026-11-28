@@ -13,6 +13,7 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
@@ -21,15 +22,18 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
@@ -37,8 +41,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -49,7 +51,8 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 
 class ScanPreviewActivity : AppCompatActivity() {
@@ -59,12 +62,19 @@ class ScanPreviewActivity : AppCompatActivity() {
     private lateinit var tvPageIndicator: TextView
     private lateinit var etDocTitle: EditText
     private lateinit var stampControlsBar: LinearLayout
+    private lateinit var adjustBar: LinearLayout
     private lateinit var tvLoadingBanner: TextView
     private lateinit var filterThumbRow: LinearLayout
+    private lateinit var cbApplyToAll: CheckBox
+    private lateinit var sbBrightness: SeekBar
+    private lateinit var sbContrast: SeekBar
 
     private val originalBitmaps = ArrayList<Bitmap>()
     private val editedBitmaps = ArrayList<Bitmap>()
     private val pageFilterModes = ArrayList<Int>()
+    private val pageBrightness = ArrayList<Float>()
+    private val pageContrast = ArrayList<Float>()
+
     private var currentIndex = 0
     private var isRetakeMode = false
     private var validatedTargetFolder: File? = null
@@ -91,7 +101,7 @@ class ScanPreviewActivity : AppCompatActivity() {
                     for (p in pages) {
                         decodeSafeUri(p.imageUri, 1600)?.let { bmp ->
                             newOrig.add(bmp)
-                            newEdit.add(applyOkenFilter(bmp, 3))
+                            newEdit.add(renderFilteredPage(bmp, 3, 0f, 1f))
                         }
                     }
                     runOnUiThread {
@@ -100,14 +110,19 @@ class ScanPreviewActivity : AppCompatActivity() {
                             originalBitmaps[currentIndex] = newOrig[0]
                             editedBitmaps[currentIndex] = newEdit[0]
                             pageFilterModes[currentIndex] = 3
+                            pageBrightness[currentIndex] = 0f
+                            pageContrast[currentIndex] = 1f
                         } else {
                             for (i in newOrig.indices) {
                                 originalBitmaps.add(newOrig[i])
                                 editedBitmaps.add(newEdit[i])
                                 pageFilterModes.add(3)
+                                pageBrightness.add(0f)
+                                pageContrast.add(1f)
                             }
                             currentIndex = originalBitmaps.size - 1
                         }
+                        syncSlidersToCurrentPage()
                         updatePageDisplay()
                         rebuildFilterThumbnails()
                     }
@@ -146,27 +161,22 @@ class ScanPreviewActivity : AppCompatActivity() {
             setBackgroundColor(0xFF18181B.toInt())
         }
 
-        // Hardware-level Safe Area Insets: Never overlaps with camera hole/status bar or bottom gesture bar
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
-            val insets = windowInsets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
-            )
-            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
-            WindowInsetsCompat.CONSUMED
-        }
-
         // Top Bar
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF18181B.toInt())
-            setPadding(dp(8), dp(8), dp(10), dp(8))
+            setPadding(dp(8), dp(8), dp(10), dp(6))
         }
 
         val btnBack = MaterialButton(this).apply {
             text = "←"
             textSize = 18f
             minWidth = dp(40)
+            minimumWidth = dp(40)
+            insetTop = 0
+            insetBottom = 0
+            setPadding(0, 0, 0, 0)
             setTextColor(0xFFFFFFFF.toInt())
             setBackgroundColor(0x00000000)
             setOnClickListener { finish() }
@@ -177,7 +187,7 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         etDocTitle = EditText(this).apply {
             setText(defaultDocName)
-            hint = "Enter Document Name"
+            hint = "Document Name"
             textSize = 14f
             setTextColor(0xFFFFFFFF.toInt())
             setHintTextColor(0xFFA1A1AA.toInt())
@@ -190,33 +200,15 @@ class ScanPreviewActivity : AppCompatActivity() {
             }
         }
 
-        val btnShareQuick = MaterialButton(this).apply {
-            text = "PDF"
-            textSize = 12f
-            minWidth = 0
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFFEA580C.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(38)
-            ).apply { marginEnd = dp(6) }
+        val btnShareQuick = makeZeroClipButton("PDF", 0xFFEA580C.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(56), dp(38)).apply { marginEnd = dp(6) }
             setOnClickListener {
                 if (editedBitmaps.isNotEmpty()) saveProjectAndFinish(shareImmediately = true)
             }
         }
 
-        val btnDone = MaterialButton(this).apply {
-            text = "Done"
-            textSize = 13f
-            minWidth = 0
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF16A34A.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(38)
-            )
+        val btnDone = makeZeroClipButton("Done", 0xFF16A34A.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(68), dp(38))
             setOnClickListener {
                 if (editedBitmaps.isNotEmpty()) saveProjectAndFinish(shareImmediately = false)
             }
@@ -234,7 +226,7 @@ class ScanPreviewActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
-            ).apply { setMargins(dp(12), dp(4), dp(12), dp(4)) }
+            ).apply { setMargins(dp(10), dp(2), dp(10), dp(2)) }
             setBackgroundColor(0xFF18181B.toInt())
         }
 
@@ -271,22 +263,19 @@ class ScanPreviewActivity : AppCompatActivity() {
         stageFrame.addView(tvLoadingBanner)
         root.addView(stageFrame)
 
-        // Page Switcher (< 1/1 >)
-        val pageNavRow = LinearLayout(this).apply {
+        // Page Switcher (< 1/1 >) + Apply to all pages Checkbox (OKEN Style)
+        val navAndApplyRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, dp(2), 0, dp(4))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(2), dp(12), dp(4))
         }
 
-        val btnPrev = MaterialButton(this).apply {
-            text = "<"
-            textSize = 14f
-            minWidth = dp(40)
-            setTextColor(0xFFD4D4D8.toInt())
-            setBackgroundColor(0x00000000)
+        val btnPrev = makeZeroClipButton("<", 0xFF27272A.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(30))
             setOnClickListener {
                 if (currentIndex > 0) {
                     currentIndex--
+                    syncSlidersToCurrentPage()
                     updatePageDisplay()
                     rebuildFilterThumbnails()
                 }
@@ -295,87 +284,138 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         tvPageIndicator = TextView(this).apply {
             text = "1/1"
-            textSize = 13f
+            textSize = 12.5f
             setTextColor(0xFFFFFFFF.toInt())
             setTypeface(null, Typeface.BOLD)
-            setPadding(dp(12), 0, dp(12), 0)
+            setPadding(dp(10), 0, dp(10), 0)
         }
 
-        val btnNext = MaterialButton(this).apply {
-            text = ">"
-            textSize = 14f
-            minWidth = dp(40)
-            setTextColor(0xFFD4D4D8.toInt())
-            setBackgroundColor(0x00000000)
+        val btnNext = makeZeroClipButton(">", 0xFF27272A.toInt(), 0xFFFFFFFF.toInt(), 13f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(30))
             setOnClickListener {
                 if (currentIndex < editedBitmaps.size - 1) {
                     currentIndex++
+                    syncSlidersToCurrentPage()
                     updatePageDisplay()
                     rebuildFilterThumbnails()
                 }
             }
         }
 
-        pageNavRow.addView(btnPrev)
-        pageNavRow.addView(tvPageIndicator)
-        pageNavRow.addView(btnNext)
-        root.addView(pageNavRow)
+        val spacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+        }
+
+        cbApplyToAll = CheckBox(this).apply {
+            text = "Apply to all pages"
+            textSize = 11.5f
+            setTextColor(0xFFE4E4E7.toInt())
+            buttonTintList = android.content.res.ColorStateList.valueOf(0xFF22C55E.toInt())
+        }
+
+        navAndApplyRow.addView(btnPrev)
+        navAndApplyRow.addView(tvPageIndicator)
+        navAndApplyRow.addView(btnNext)
+        navAndApplyRow.addView(spacer)
+        navAndApplyRow.addView(cbApplyToAll)
+        root.addView(navAndApplyRow)
+
+        // Brightness & Contrast Adjust Bar (Hidden until 'Adjust' tapped)
+        adjustBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF27272A.toInt())
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            visibility = View.GONE
+        }
+
+        val brightRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val tvB = TextView(this).apply {
+            text = "Bright"
+            textSize = 11f
+            setTextColor(0xFFFFFFFF.toInt())
+            layoutParams = LinearLayout.LayoutParams(dp(54), LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        sbBrightness = SeekBar(this).apply {
+            max = 100
+            progress = 50
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                    if (fromUser && originalBitmaps.isNotEmpty()) {
+                        applyCurrentToneAdjustments()
+                    }
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        }
+        brightRow.addView(tvB)
+        brightRow.addView(sbBrightness)
+
+        val contrastRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, 0)
+        }
+        val tvC = TextView(this).apply {
+            text = "Contrast"
+            textSize = 11f
+            setTextColor(0xFFFFFFFF.toInt())
+            layoutParams = LinearLayout.LayoutParams(dp(54), LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        sbContrast = SeekBar(this).apply {
+            max = 100
+            progress = 50
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                    if (fromUser && originalBitmaps.isNotEmpty()) {
+                        applyCurrentToneAdjustments()
+                    }
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        }
+        contrastRow.addView(tvC)
+        contrastRow.addView(sbContrast)
+
+        adjustBar.addView(brightRow)
+        adjustBar.addView(contrastRow)
+        root.addView(adjustBar)
 
         // Stamp Controls Bar
         stampControlsBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF27272A.toInt())
-            setPadding(dp(10), dp(4), dp(10), dp(4))
+            setPadding(dp(8), dp(5), dp(8), dp(5))
             visibility = View.GONE
         }
 
-        val btnStampSmaller = MaterialButton(this).apply {
-            text = "A-"
-            textSize = 11f
-            minWidth = 0
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF3F3F46.toInt())
+        val btnStampSmaller = makeZeroClipButton("Size -", 0xFF3F3F46.toInt(), 0xFFFFFFFF.toInt(), 11f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(60), dp(36))
             setOnClickListener { overlayView.adjustScale(-0.15f) }
         }
 
-        val btnStampBigger = MaterialButton(this).apply {
-            text = "A+"
-            textSize = 11f
-            minWidth = 0
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF3F3F46.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(6) }
+        val btnStampBigger = makeZeroClipButton("Size +", 0xFF3F3F46.toInt(), 0xFFFFFFFF.toInt(), 11f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(60), dp(36)).apply { marginStart = dp(6) }
             setOnClickListener { overlayView.adjustScale(0.15f) }
         }
 
-        val btnClearStamp = MaterialButton(this).apply {
-            text = "Remove"
-            textSize = 11f
-            minWidth = 0
-            setTextColor(0xFFFCA5A5.toInt())
-            setBackgroundColor(0x00000000)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(6) }
+        val btnClearStamp = makeZeroClipButton("Remove", 0xFF450A0A.toInt(), 0xFFFCA5A5.toInt(), 11f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(68), dp(36)).apply { marginStart = dp(6) }
             setOnClickListener {
                 overlayView.clearStamp()
                 stampControlsBar.visibility = View.GONE
             }
         }
 
-        val btnFixStamp = MaterialButton(this).apply {
-            text = "✓ Fix on Page"
-            textSize = 12f
-            setTextColor(0xFFFFFFFF.toInt())
-            setBackgroundColor(0xFF16A34A.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(8)
-            }
+        val btnFixStamp = makeZeroClipButton("✓ Fix on Page", 0xFF16A34A.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f).apply { marginStart = dp(6) }
             setOnClickListener { burnStampOntoCurrentPage() }
         }
 
@@ -389,7 +429,7 @@ class ScanPreviewActivity : AppCompatActivity() {
         val filterScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             setBackgroundColor(0xFF27272A.toInt())
-            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setPadding(dp(8), dp(6), dp(8), dp(6))
         }
 
         filterThumbRow = LinearLayout(this).apply {
@@ -399,11 +439,11 @@ class ScanPreviewActivity : AppCompatActivity() {
         filterScroll.addView(filterThumbRow)
         root.addView(filterScroll)
 
-        // OKEN-Style Bottom 5-Action Toolbar
+        // OKEN-Style Bottom 6-Action Toolbar
         val bottomToolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(0xFF18181B.toInt())
-            setPadding(dp(4), dp(6), dp(4), dp(8))
+            setPadding(dp(2), dp(6), dp(2), dp(8))
         }
 
         fun makeBottomTool(icon: String, label: String, onClick: () -> Unit): LinearLayout {
@@ -415,13 +455,14 @@ class ScanPreviewActivity : AppCompatActivity() {
 
                 val tvIcon = TextView(this@ScanPreviewActivity).apply {
                     text = icon
-                    textSize = 16f
+                    textSize = 15f
                     setTextColor(0xFFFFFFFF.toInt())
                     gravity = Gravity.CENTER
                 }
                 val tvLbl = TextView(this@ScanPreviewActivity).apply {
                     text = label
-                    textSize = 11f
+                    textSize = 10f
+                    maxLines = 1
                     setTextColor(0xFFD4D4D8.toInt())
                     gravity = Gravity.CENTER
                 }
@@ -437,7 +478,7 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         bottomToolbar.addView(makeBottomTool("➕", "Add") {
             isRetakeMode = false
-            launchScannerForMore(pageLimit = 15)
+            launchScannerForMore(pageLimit = 20)
         })
 
         bottomToolbar.addView(makeBottomTool("↺", "Left") {
@@ -445,10 +486,14 @@ class ScanPreviewActivity : AppCompatActivity() {
         })
 
         bottomToolbar.addView(makeBottomTool("✂️", "Crop") {
-            openManualCropForCurrentPage()
+            openPerspectiveWarpCropDialog()
         })
 
-        bottomToolbar.addView(makeBottomTool("🔏", "Mohar/Sign") {
+        bottomToolbar.addView(makeBottomTool("☀️", "Adjust") {
+            adjustBar.visibility = if (adjustBar.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        })
+
+        bottomToolbar.addView(makeBottomTool("🔏", "Mohar") {
             openStampAndSignMenu()
         })
 
@@ -492,7 +537,7 @@ class ScanPreviewActivity : AppCompatActivity() {
                 val parsedUri = Uri.parse(uriStr)
                 decodeSafeUri(parsedUri, 1600)?.let { bmp ->
                     loadedOrig.add(bmp)
-                    loadedEdit.add(applyOkenFilter(bmp, 3))
+                    loadedEdit.add(renderFilteredPage(bmp, 3, 0f, 1f))
                 }
             }
 
@@ -505,12 +550,40 @@ class ScanPreviewActivity : AppCompatActivity() {
                 } else {
                     originalBitmaps.addAll(loadedOrig)
                     editedBitmaps.addAll(loadedEdit)
-                    repeat(loadedOrig.size) { pageFilterModes.add(3) }
+                    repeat(loadedOrig.size) {
+                        pageFilterModes.add(3)
+                        pageBrightness.add(0f)
+                        pageContrast.add(1f)
+                    }
                     updatePageDisplay()
                     rebuildFilterThumbnails()
                 }
             }
         }.start()
+    }
+
+    private fun makeZeroClipButton(
+        label: String,
+        bgColor: Int,
+        txtColor: Int,
+        txtSize: Float,
+        dp: (Int) -> Int
+    ): MaterialButton {
+        return MaterialButton(this).apply {
+            text = label
+            textSize = txtSize
+            isAllCaps = false
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            minWidth = 0
+            minimumWidth = 0
+            insetTop = 0
+            insetBottom = 0
+            setPadding(dp(4), 0, dp(4), 0)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(txtColor)
+            setBackgroundColor(bgColor)
+        }
     }
 
     private fun decodeSafeUri(uri: Uri, maxDim: Int): Bitmap? {
@@ -530,6 +603,32 @@ class ScanPreviewActivity : AppCompatActivity() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun syncSlidersToCurrentPage() {
+        if (pageBrightness.isEmpty()) return
+        val b = pageBrightness[currentIndex] // -60..+60 -> 0..100
+        val c = pageContrast[currentIndex]   // 0.6..1.5 -> 0..100
+        sbBrightness.progress = (((b + 60f) / 120f) * 100f).toInt().coerceIn(0, 100)
+        sbContrast.progress = (((c - 0.6f) / 0.9f) * 100f).toInt().coerceIn(0, 100)
+    }
+
+    private fun applyCurrentToneAdjustments() {
+        val extraBright = ((sbBrightness.progress - 50) / 50f) * 60f
+        val extraContrast = 1f + ((sbContrast.progress - 50) / 50f) * 0.45f
+
+        if (cbApplyToAll.isChecked) {
+            for (i in originalBitmaps.indices) {
+                pageBrightness[i] = extraBright
+                pageContrast[i] = extraContrast
+                editedBitmaps[i] = renderFilteredPage(originalBitmaps[i], pageFilterModes[i], extraBright, extraContrast)
+            }
+        } else {
+            pageBrightness[currentIndex] = extraBright
+            pageContrast[currentIndex] = extraContrast
+            editedBitmaps[currentIndex] = renderFilteredPage(originalBitmaps[currentIndex], pageFilterModes[currentIndex], extraBright, extraContrast)
+        }
+        ivPreview.setImageBitmap(editedBitmaps[currentIndex])
     }
 
     private fun rebuildFilterThumbnails() {
@@ -567,10 +666,10 @@ class ScanPreviewActivity : AppCompatActivity() {
             val ivThumb = ImageView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    dp(68)
+                    dp(64)
                 )
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                setImageBitmap(applyOkenFilter(tinySrc, modeIdx))
+                setImageBitmap(renderFilteredPage(tinySrc, modeIdx, 0f, 1f))
             }
 
             val tvName = TextView(this).apply {
@@ -588,8 +687,26 @@ class ScanPreviewActivity : AppCompatActivity() {
             card.addView(col)
 
             card.setOnClickListener {
-                pageFilterModes[currentIndex] = modeIdx
-                editedBitmaps[currentIndex] = applyOkenFilter(originalBitmaps[currentIndex], modeIdx)
+                if (cbApplyToAll.isChecked) {
+                    for (i in originalBitmaps.indices) {
+                        pageFilterModes[i] = modeIdx
+                        editedBitmaps[i] = renderFilteredPage(
+                            originalBitmaps[i],
+                            modeIdx,
+                            pageBrightness[i],
+                            pageContrast[i]
+                        )
+                    }
+                    Toast.makeText(this, "Applied '${filterNames[modeIdx]}' to all pages", Toast.LENGTH_SHORT).show()
+                } else {
+                    pageFilterModes[currentIndex] = modeIdx
+                    editedBitmaps[currentIndex] = renderFilteredPage(
+                        originalBitmaps[currentIndex],
+                        modeIdx,
+                        pageBrightness[currentIndex],
+                        pageContrast[currentIndex]
+                    )
+                }
                 ivPreview.setImageBitmap(editedBitmaps[currentIndex])
                 rebuildFilterThumbnails()
             }
@@ -598,54 +715,57 @@ class ScanPreviewActivity : AppCompatActivity() {
         }
     }
 
-    private fun applyOkenFilter(src: Bitmap, mode: Int): Bitmap {
+    private fun renderFilteredPage(src: Bitmap, mode: Int, extraBright: Float, extraContrast: Float): Bitmap {
         val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        if (mode == 1) {
-            canvas.drawBitmap(src, 0f, 0f, paint)
-            return out
-        }
-
         val cm = ColorMatrix()
-        var contrast = 1.0f
-        var brightness = 0f
+        var baseContrast = 1.0f
+        var baseBrightness = 0f
 
         when (mode) {
-            0 -> {
+            0 -> { // No shadow
                 cm.setSaturation(1.1f)
-                contrast = 1.48f
-                brightness = 34f
+                baseContrast = 1.48f
+                baseBrightness = 34f
             }
-            2 -> {
+            1 -> { // Original
+                cm.setSaturation(1.0f)
+                baseContrast = 1.0f
+                baseBrightness = 0f
+            }
+            2 -> { // Lighten
                 cm.setSaturation(1.05f)
-                contrast = 1.15f
-                brightness = 28f
+                baseContrast = 1.15f
+                baseBrightness = 28f
             }
-            3 -> {
+            3 -> { // Magic Color
                 cm.setSaturation(1.32f)
-                contrast = 1.38f
-                brightness = 14f
+                baseContrast = 1.38f
+                baseBrightness = 14f
             }
-            4 -> {
+            4 -> { // Doc Clear
                 cm.setSaturation(0.25f)
-                contrast = 1.65f
-                brightness = 22f
+                baseContrast = 1.65f
+                baseBrightness = 22f
             }
-            5 -> {
+            5 -> { // Grayscale
                 cm.setSaturation(0f)
-                contrast = 1.75f
-                brightness = 18f
+                baseContrast = 1.75f
+                baseBrightness = 18f
             }
         }
 
-        val translate = (-.5f * contrast + .5f) * 255f + brightness
+        val finalContrast = (baseContrast * extraContrast).coerceIn(0.4f, 2.8f)
+        val finalBrightness = baseBrightness + extraBright
+        val translate = (-.5f * finalContrast + .5f) * 255f + finalBrightness
+
         val tone = ColorMatrix(
             floatArrayOf(
-                contrast, 0f, 0f, 0f, translate,
-                0f, contrast, 0f, 0f, translate,
-                0f, 0f, contrast, 0f, translate,
+                finalContrast, 0f, 0f, 0f, translate,
+                0f, finalContrast, 0f, 0f, translate,
+                0f, 0f, finalContrast, 0f, translate,
                 0f, 0f, 0f, 1f, 0f
             )
         )
@@ -660,45 +780,85 @@ class ScanPreviewActivity : AppCompatActivity() {
         val orig = originalBitmaps[currentIndex]
         val rotOrig = Bitmap.createBitmap(orig, 0, 0, orig.width, orig.height, m, true)
         originalBitmaps[currentIndex] = rotOrig
-        editedBitmaps[currentIndex] = applyOkenFilter(rotOrig, pageFilterModes[currentIndex])
+        editedBitmaps[currentIndex] = renderFilteredPage(
+            rotOrig,
+            pageFilterModes[currentIndex],
+            pageBrightness[currentIndex],
+            pageContrast[currentIndex]
+        )
         ivPreview.setImageBitmap(editedBitmaps[currentIndex])
         rebuildFilterThumbnails()
     }
 
-    private fun openManualCropForCurrentPage() {
+    // 4-Corner Perspective Warp + Magnifier Loupe (Straightens tilted documents cleanly)
+    private fun openPerspectiveWarpCropDialog() {
         val currentOrig = originalBitmaps[currentIndex]
         val density = resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
 
-        val frame = FrameLayout(this).apply {
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0F172A.toInt())
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+
+        val tipTv = TextView(this).apply {
+            text = "Drag any corner (Magnifier zoom appears above finger)"
+            textSize = 11.5f
+            setTextColor(0xFFE2E8F0.toInt())
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(6))
+        }
+
+        val cropView = PerspectiveMagnifierCropView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(360)
             )
-            setBackgroundColor(0xFF0F172A.toInt())
+            setSourceBitmap(currentOrig)
         }
 
-        val cropView = PageCropView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            setSource(currentOrig)
-        }
-        frame.addView(cropView)
+        var dlg: AlertDialog? = null
 
-        AlertDialog.Builder(this)
-            .setTitle("Crop Page (Drag Orange Corners)")
-            .setView(frame)
-            .setPositiveButton("✓ Apply Crop") { _, _ ->
-                val cropped = cropView.getCropped()
-                originalBitmaps[currentIndex] = cropped
-                editedBitmaps[currentIndex] = applyOkenFilter(cropped, pageFilterModes[currentIndex])
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+
+        val btnReset = makeZeroClipButton("Reset Corners", 0xFF334155.toInt(), 0xFFFFFFFF.toInt(), 12f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) }
+            setOnClickListener { cropView.resetCorners() }
+        }
+
+        val btnApply = makeZeroClipButton("✓ Straighten & Apply", 0xFF16A34A.toInt(), 0xFFFFFFFF.toInt(), 12.5f, dp).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(42), 1.3f)
+            setOnClickListener {
+                val warped = cropView.extractWarpedFlatBitmap()
+                originalBitmaps[currentIndex] = warped
+                editedBitmaps[currentIndex] = renderFilteredPage(
+                    warped,
+                    pageFilterModes[currentIndex],
+                    pageBrightness[currentIndex],
+                    pageContrast[currentIndex]
+                )
                 ivPreview.setImageBitmap(editedBitmaps[currentIndex])
                 rebuildFilterThumbnails()
+                dlg?.dismiss()
             }
+        }
+
+        btnRow.addView(btnReset)
+        btnRow.addView(btnApply)
+        wrapper.addView(tipTv)
+        wrapper.addView(cropView)
+        wrapper.addView(btnRow)
+
+        dlg = AlertDialog.Builder(this)
+            .setTitle("Perspective Auto-Straighten Crop")
+            .setView(wrapper)
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+        dlg.show()
     }
 
     private fun launchScannerForMore(pageLimit: Int) {
@@ -706,7 +866,7 @@ class ScanPreviewActivity : AppCompatActivity() {
             .setGalleryImportAllowed(true)
             .setPageLimit(pageLimit)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .build()
 
         GmsDocumentScanning.getClient(options).getStartScanIntent(this)
@@ -747,15 +907,15 @@ class ScanPreviewActivity : AppCompatActivity() {
         val savedSignFile = File(assetsDir, "saved_sign.png")
 
         val options = ArrayList<String>()
-        options.add("🔏 Create Custom Mohar / Office Seal")
+        options.add("🔏 Create Custom Mohar / Seal")
         if (savedMoharFile.exists()) options.add("📌 Use Saved Mohar")
-        options.add("✍️ Draw Digital Signature (E-Sign)")
+        options.add("✍️ Draw Digital Signature")
         if (savedSignFile.exists()) options.add("🖊️ Use Saved Signature")
-        options.add("📋 'SELF ATTESTED' + Today's Date")
-        options.add("⚖️ 'CERTIFIED TRUE COPY' Stamp")
+        options.add("📋 'SELF ATTESTED' + Date")
+        options.add("⚖️ 'CERTIFIED TRUE COPY'")
 
         AlertDialog.Builder(this)
-            .setTitle("Add Mohar / Stamp / Signature")
+            .setTitle("Add Mohar / Signature")
             .setItems(options.toTypedArray()) { _, which ->
                 val choice = options[which]
                 when {
@@ -785,17 +945,17 @@ class ScanPreviewActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(40, 24, 40, 10)
         }
-        val etLine1 = EditText(this).apply { hint = "Top Line (e.g. ADV. VICKY TIWARI)" }
-        val etLine2 = EditText(this).apply { hint = "Middle / Designation (e.g. ADVOCATE)" }
-        val etLine3 = EditText(this).apply { hint = "Bottom / Place (e.g. HIGH COURT LUCKNOW)" }
+        val etLine1 = EditText(this).apply { hint = "Top Line (e.g. ADV. VICKY TIWARI)"; isSingleLine = true }
+        val etLine2 = EditText(this).apply { hint = "Middle / Title (e.g. ADVOCATE)"; isSingleLine = true }
+        val etLine3 = EditText(this).apply { hint = "Bottom / Place (e.g. HIGH COURT LUCKNOW)"; isSingleLine = true }
         layout.addView(etLine1)
         layout.addView(etLine2)
         layout.addView(etLine3)
 
         AlertDialog.Builder(this)
-            .setTitle("Design Your Mohar (Seal)")
+            .setTitle("Design Your Mohar")
             .setView(layout)
-            .setPositiveButton("Round Mohar (Blue)") { _, _ ->
+            .setPositiveButton("Round Mohar") { _, _ ->
                 val bmp = generateRoundMoharBitmap(
                     etLine1.text.toString().trim().ifEmpty { "AUTHORIZED SEAL" },
                     etLine2.text.toString().trim().ifEmpty { "VERIFIED" },
@@ -805,7 +965,7 @@ class ScanPreviewActivity : AppCompatActivity() {
                 FileOutputStream(saveFile).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
                 placeStampOnOverlay(bmp)
             }
-            .setNeutralButton("Box Mohar (Blue)") { _, _ ->
+            .setNeutralButton("Box Mohar") { _, _ ->
                 val l2 = listOf(etLine2.text.toString().trim(), etLine3.text.toString().trim())
                     .filter { it.isNotEmpty() }.joinToString(" | ")
                 val bmp = generateBoxStampBitmap(
@@ -828,9 +988,9 @@ class ScanPreviewActivity : AppCompatActivity() {
             )
         }
         AlertDialog.Builder(this)
-            .setTitle("Sign with Finger Below")
+            .setTitle("Sign with Finger")
             .setView(pad)
-            .setPositiveButton("Apply & Save Sign") { _, _ ->
+            .setPositiveButton("Apply & Save") { _, _ ->
                 val bmp = pad.exportSignatureBitmap()
                 if (bmp != null) {
                     FileOutputStream(saveFile).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
@@ -885,8 +1045,8 @@ class ScanPreviewActivity : AppCompatActivity() {
     }
 
     private fun generateBoxStampBitmap(title: String, subtitle: String, inkColor: Int): Bitmap {
-        val w = 520
-        val h = 170
+        val w = 560
+        val h = 180
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -898,26 +1058,26 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = inkColor
-            textSize = 36f
+            textSize = if (title.length > 20) 27f else 34f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
         val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = inkColor
-            textSize = 23f
+            textSize = if (subtitle.length > 28) 18f else 22f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
         if (subtitle.isEmpty()) canvas.drawText(title, w / 2f, h / 2f + 12f, titlePaint)
         else {
-            canvas.drawText(title, w / 2f, 74f, titlePaint)
-            canvas.drawText(subtitle, w / 2f, 124f, subPaint)
+            canvas.drawText(title, w / 2f, 76f, titlePaint)
+            canvas.drawText(subtitle, w / 2f, 128f, subPaint)
         }
         return bmp
     }
 
     private fun generateRoundMoharBitmap(topText: String, centerText: String, bottomText: String, inkColor: Int): Bitmap {
-        val size = 380
+        val size = 420
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val cx = size / 2f
@@ -925,25 +1085,31 @@ class ScanPreviewActivity : AppCompatActivity() {
 
         val outerRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = inkColor; style = Paint.Style.STROKE; strokeWidth = 8f }
         val innerRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = inkColor; style = Paint.Style.STROKE; strokeWidth = 3.5f }
-        canvas.drawCircle(cx, cy, 174f, outerRing)
-        canvas.drawCircle(cx, cy, 162f, innerRing)
-        canvas.drawCircle(cx, cy, 108f, innerRing)
+        canvas.drawCircle(cx, cy, 192f, outerRing)
+        canvas.drawCircle(cx, cy, 178f, innerRing)
+        canvas.drawCircle(cx, cy, 118f, innerRing)
 
-        val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val arcPaintTop = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = inkColor
-            textSize = 24f
+            textSize = if (topText.length > 18) 20f else 24f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
-        val topArc = Path().apply { addArc(RectF(cx - 132f, cy - 132f, cx + 132f, cy + 132f), 190f, 160f) }
-        canvas.drawTextOnPath(topText.uppercase(Locale.getDefault()), topArc, 0f, 0f, arcPaint)
+        val topArc = Path().apply { addArc(RectF(cx - 146f, cy - 146f, cx + 146f, cy + 146f), 190f, 160f) }
+        canvas.drawTextOnPath(topText.uppercase(Locale.getDefault()), topArc, 0f, 0f, arcPaintTop)
 
-        val bottomArc = Path().apply { addArc(RectF(cx - 138f, cy - 138f, cx + 138f, cy + 138f), 165f, -150f) }
-        canvas.drawTextOnPath(bottomText.uppercase(Locale.getDefault()), bottomArc, 0f, 0f, arcPaint)
+        val arcPaintBot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = inkColor
+            textSize = if (bottomText.length > 18) 19f else 23f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val bottomArc = Path().apply { addArc(RectF(cx - 152f, cy - 152f, cx + 152f, cy + 152f), 165f, -150f) }
+        canvas.drawTextOnPath(bottomText.uppercase(Locale.getDefault()), bottomArc, 0f, 0f, arcPaintBot)
 
         val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = inkColor
-            textSize = 27f
+            textSize = if (centerText.length > 12) 22f else 26f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
@@ -1045,6 +1211,200 @@ class ScanPreviewActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
+    // ==================== PERSPECTIVE WARP + MAGNIFIER LOUPE VIEW ====================
+
+    private class PerspectiveMagnifierCropView(context: Context) : View(context) {
+        private var srcBmp: Bitmap? = null
+        private val imgRect = RectF()
+        private val corners = Array(4) { PointF() } // 0:TL, 1:TR, 2:BR, 3:BL
+        private var activeCorner = -1
+        private var touchX = 0f
+        private var touchY = 0f
+
+        private val shadePaint = Paint().apply {
+            color = 0x77000000.toInt()
+            style = Paint.Style.FILL
+        }
+        private val quadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF22C55E.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+        }
+        private val cornerFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFEA580C.toInt()
+            style = Paint.Style.FILL
+        }
+        private val cornerRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 4f
+        }
+
+        fun setSourceBitmap(b: Bitmap) {
+            srcBmp = b
+            resetCorners()
+        }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            resetCorners()
+        }
+
+        fun resetCorners() {
+            val b = srcBmp ?: return
+            if (width <= 0 || height <= 0) return
+            val s = min(width.toFloat() / b.width.toFloat(), height.toFloat() / b.height.toFloat())
+            val dw = b.width * s
+            val dh = b.height * s
+            val l = (width - dw) / 2f
+            val t = (height - dh) / 2f
+            imgRect.set(l, t, l + dw, t + dh)
+
+            val padX = dw * 0.07f
+            val padY = dh * 0.07f
+            corners[0].set(l + padX, t + padY)
+            corners[1].set(l + dw - padX, t + padY)
+            corners[2].set(l + dw - padX, t + dh - padY)
+            corners[3].set(l + padX, t + dh - padY)
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val b = srcBmp ?: return
+            canvas.drawBitmap(b, null, imgRect, null)
+
+            // Draw 4-point quadrilateral border
+            val path = Path().apply {
+                moveTo(corners[0].x, corners[0].y)
+                lineTo(corners[1].x, corners[1].y)
+                lineTo(corners[2].x, corners[2].y)
+                lineTo(corners[3].x, corners[3].y)
+                close()
+            }
+            canvas.drawPath(path, quadPaint)
+
+            // Draw 4 corner handles + 4 mid-edge dots
+            for (i in 0..3) {
+                canvas.drawCircle(corners[i].x, corners[i].y, 19f, cornerFill)
+                canvas.drawCircle(corners[i].x, corners[i].y, 19f, cornerRing)
+
+                val next = corners[(i + 1) % 4]
+                val mx = (corners[i].x + next.x) / 2f
+                val my = (corners[i].y + next.y) / 2f
+                canvas.drawCircle(mx, my, 10f, cornerRing)
+            }
+
+            // OKEN-style Magnifier Zoom Loupe in top corner when dragging a handle
+            if (activeCorner != -1 && imgRect.width() > 0f && imgRect.height() > 0f) {
+                val loupeR = 95f
+                val loupeCx = if (touchX < width / 2f) width - loupeR - 24f else loupeR + 24f
+                val loupeCy = loupeR + 24f
+
+                val sx = ((touchX - imgRect.left) / imgRect.width()) * b.width
+                val sy = ((touchY - imgRect.top) / imgRect.height()) * b.height
+
+                canvas.save()
+                val clipCircle = Path().apply { addCircle(loupeCx, loupeCy, loupeR, Path.Direction.CW) }
+                canvas.clipPath(clipCircle)
+                canvas.drawColor(Color.BLACK)
+
+                val zoomMatrix = Matrix().apply {
+                    postTranslate(-sx, -sy)
+                    postScale(2.2f, 2.2f)
+                    postTranslate(loupeCx, loupeCy)
+                }
+                canvas.drawBitmap(b, zoomMatrix, null)
+
+                // Crosshair inside magnifier
+                val crossPaint = Paint().apply { color = 0xFFEA580C.toInt(); strokeWidth = 3f }
+                canvas.drawLine(loupeCx - 24f, loupeCy, loupeCx + 24f, loupeCy, crossPaint)
+                canvas.drawLine(loupeCx, loupeCy - 24f, loupeCx, loupeCy + 24f, crossPaint)
+                canvas.restore()
+
+                canvas.drawCircle(loupeCx, loupeCy, loupeR, cornerRing)
+            }
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (srcBmp == null) return false
+            val x = event.x.coerceIn(imgRect.left, imgRect.right)
+            val y = event.y.coerceIn(imgRect.top, imgRect.bottom)
+
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    var bestIdx = -1
+                    var bestDist = 75f
+                    for (i in 0..3) {
+                        val d = hypot((x - corners[i].x).toDouble(), (y - corners[i].y).toDouble()).toFloat()
+                        if (d < bestDist) {
+                            bestDist = d
+                            bestIdx = i
+                        }
+                    }
+                    activeCorner = bestIdx
+                    touchX = x
+                    touchY = y
+                    invalidate()
+                    return activeCorner != -1
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (activeCorner != -1) {
+                        corners[activeCorner].set(x, y)
+                        touchX = x
+                        touchY = y
+                        invalidate()
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    activeCorner = -1
+                    invalidate()
+                }
+            }
+            return false
+        }
+
+        fun extractWarpedFlatBitmap(): Bitmap {
+            val b = srcBmp ?: return Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888)
+            if (imgRect.width() <= 0f || imgRect.height() <= 0f) return b
+
+            val scaleX = b.width.toFloat() / imgRect.width()
+            val scaleY = b.height.toFloat() / imgRect.height()
+
+            val srcPts = floatArrayOf(
+                (corners[0].x - imgRect.left) * scaleX, (corners[0].y - imgRect.top) * scaleY,
+                (corners[1].x - imgRect.left) * scaleX, (corners[1].y - imgRect.top) * scaleY,
+                (corners[2].x - imgRect.left) * scaleX, (corners[2].y - imgRect.top) * scaleY,
+                (corners[3].x - imgRect.left) * scaleX, (corners[3].y - imgRect.top) * scaleY
+            )
+
+            val topW = hypot((srcPts[2] - srcPts[0]).toDouble(), (srcPts[3] - srcPts[1]).toDouble()).toFloat()
+            val botW = hypot((srcPts[4] - srcPts[6]).toDouble(), (srcPts[5] - srcPts[7]).toDouble()).toFloat()
+            val leftH = hypot((srcPts[6] - srcPts[0]).toDouble(), (srcPts[7] - srcPts[1]).toDouble()).toFloat()
+            val rightH = hypot((srcPts[4] - srcPts[2]).toDouble(), (srcPts[5] - srcPts[3]).toDouble()).toFloat()
+
+            val outW = max(topW, botW).toInt().coerceIn(200, 2400)
+            val outH = max(leftH, rightH).toInt().coerceIn(200, 3200)
+
+            val dstPts = floatArrayOf(
+                0f, 0f,
+                outW.toFloat(), 0f,
+                outW.toFloat(), outH.toFloat(),
+                0f, outH.toFloat()
+            )
+
+            val warpMatrix = Matrix()
+            warpMatrix.setPolyToPoly(srcPts, 0, dstPts, 0, 4)
+
+            val result = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result)
+            canvas.drawColor(Color.WHITE)
+            canvas.drawBitmap(b, warpMatrix, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            return result
+        }
+    }
+
     private class StampOverlayView(context: Context) : View(context) {
         var activeStamp: Bitmap? = null
         var stampX = 120f
@@ -1142,130 +1502,6 @@ class ScanPreviewActivity : AppCompatActivity() {
             val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             Canvas(bmp).drawPath(signPath, signPaint)
             return bmp
-        }
-    }
-
-    private class PageCropView(context: Context) : View(context) {
-        private var src: Bitmap? = null
-        private val imgRect = RectF()
-        private val cropRect = RectF()
-        private var handle = 0
-        private var lastX = 0f
-        private var lastY = 0f
-
-        private val shade = Paint().apply { color = 0x88000000.toInt(); style = Paint.Style.FILL }
-        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF16A34A.toInt(); style = Paint.Style.STROKE; strokeWidth = 5f }
-        private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFEA580C.toInt(); style = Paint.Style.FILL }
-
-        fun setSource(b: Bitmap) {
-            src = b
-            calcRects()
-            invalidate()
-        }
-
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            super.onSizeChanged(w, h, oldw, oldh)
-            calcRects()
-        }
-
-        private fun calcRects() {
-            val b = src ?: return
-            if (width <= 0 || height <= 0) return
-            val s = min(width.toFloat() / b.width.toFloat(), height.toFloat() / b.height.toFloat())
-            val dw = b.width * s
-            val dh = b.height * s
-            val l = (width - dw) / 2f
-            val t = (height - dh) / 2f
-            imgRect.set(l, t, l + dw, t + dh)
-            cropRect.set(l + dw * 0.08f, t + dh * 0.08f, l + dw * 0.92f, t + dh * 0.92f)
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val b = src ?: return
-            canvas.drawBitmap(b, null, imgRect, null)
-            canvas.drawRect(imgRect.left, imgRect.top, imgRect.right, cropRect.top, shade)
-            canvas.drawRect(imgRect.left, cropRect.bottom, imgRect.right, imgRect.bottom, shade)
-            canvas.drawRect(imgRect.left, cropRect.top, cropRect.left, cropRect.bottom, shade)
-            canvas.drawRect(cropRect.right, cropRect.top, imgRect.right, cropRect.bottom, shade)
-            canvas.drawRect(cropRect, line)
-            for ((cx, cy) in listOf(
-                Pair(cropRect.left, cropRect.top),
-                Pair(cropRect.right, cropRect.top),
-                Pair(cropRect.right, cropRect.bottom),
-                Pair(cropRect.left, cropRect.bottom)
-            )) {
-                canvas.drawCircle(cx, cy, 18f, dot)
-            }
-        }
-
-        override fun onTouchEvent(event: MotionEvent): Boolean {
-            if (src == null) return false
-            val x = event.x
-            val y = event.y
-            val r = 60f
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    handle = when {
-                        abs(x - cropRect.left) < r && abs(y - cropRect.top) < r -> 1
-                        abs(x - cropRect.right) < r && abs(y - cropRect.top) < r -> 2
-                        abs(x - cropRect.right) < r && abs(y - cropRect.bottom) < r -> 3
-                        abs(x - cropRect.left) < r && abs(y - cropRect.bottom) < r -> 4
-                        cropRect.contains(x, y) -> 5
-                        else -> 0
-                    }
-                    lastX = x
-                    lastY = y
-                    return handle != 0
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = x - lastX
-                    val dy = y - lastY
-                    when (handle) {
-                        1 -> {
-                            cropRect.left = (cropRect.left + dx).coerceIn(imgRect.left, cropRect.right - 80f)
-                            cropRect.top = (cropRect.top + dy).coerceIn(imgRect.top, cropRect.bottom - 80f)
-                        }
-                        2 -> {
-                            cropRect.right = (cropRect.right + dx).coerceIn(cropRect.left + 80f, imgRect.right)
-                            cropRect.top = (cropRect.top + dy).coerceIn(imgRect.top, cropRect.bottom - 80f)
-                        }
-                        3 -> {
-                            cropRect.right = (cropRect.right + dx).coerceIn(cropRect.left + 80f, imgRect.right)
-                            cropRect.bottom = (cropRect.bottom + dy).coerceIn(cropRect.top + 80f, imgRect.bottom)
-                        }
-                        4 -> {
-                            cropRect.left = (cropRect.left + dx).coerceIn(imgRect.left, cropRect.right - 80f)
-                            cropRect.bottom = (cropRect.bottom + dy).coerceIn(cropRect.top + 80f, imgRect.bottom)
-                        }
-                        5 -> {
-                            val w = cropRect.width()
-                            val h = cropRect.height()
-                            val nl = (cropRect.left + dx).coerceIn(imgRect.left, imgRect.right - w)
-                            val nt = (cropRect.top + dy).coerceIn(imgRect.top, imgRect.bottom - h)
-                            cropRect.set(nl, nt, nl + w, nt + h)
-                        }
-                    }
-                    lastX = x
-                    lastY = y
-                    invalidate()
-                    return true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> handle = 0
-            }
-            return false
-        }
-
-        fun getCropped(): Bitmap {
-            val b = src ?: return Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888)
-            if (imgRect.width() <= 0f || imgRect.height() <= 0f) return b
-            val sx = b.width.toFloat() / imgRect.width()
-            val sy = b.height.toFloat() / imgRect.height()
-            val l = ((cropRect.left - imgRect.left) * sx).toInt().coerceIn(0, b.width - 10)
-            val t = ((cropRect.top - imgRect.top) * sy).toInt().coerceIn(0, b.height - 10)
-            val cw = (cropRect.width() * sx).toInt().coerceIn(10, b.width - l)
-            val ch = (cropRect.height() * sy).toInt().coerceIn(10, b.height - t)
-            return Bitmap.createBitmap(b, l, t, cw, ch)
         }
     }
 }
