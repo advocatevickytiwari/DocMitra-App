@@ -1,12 +1,15 @@
 package com.docmitra.scanner
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
+import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.os.ParcelFileDescriptor
@@ -25,6 +28,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -43,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private var isHindi = false
     private var currentSearchQuery = ""
     private var targetProjectFolderForScan: String? = null
+    private var tempDirectCamFile: File? = null
     @Volatile private var isBusyProcessing = false
 
     private val bgExecutor = Executors.newSingleThreadExecutor()
@@ -56,6 +61,52 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ivTabTools: ImageView
     private lateinit var tvTabTools: TextView
 
+    // Runtime Camera Permission Launcher
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchDirectSystemCamera()
+        } else {
+            Toast.makeText(this, "Camera permission denied. Please allow Camera in Settings.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Direct System Camera Fallback (100% reliable on every Android phone)
+    private val directCameraLauncher = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        val file = tempDirectCamFile
+        if (success && file != null && file.exists() && file.length() > 0) {
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            openPreviewStudioWithUris(arrayListOf(uri.toString()))
+        } else {
+            targetProjectFolderForScan = null
+        }
+    }
+
+    // Direct Multi-Image Gallery Picker
+    private val galleryMultiLauncher = registerForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (!uris.isNullOrEmpty()) {
+            val copiedUris = ArrayList<String>()
+            for ((idx, srcUri) in uris.take(20).withIndex()) {
+                copyUriToSafeCacheFile(srcUri, "gal_${System.currentTimeMillis()}_$idx.jpg")?.let {
+                    copiedUris.add(it.toString())
+                }
+            }
+            if (copiedUris.isNotEmpty()) {
+                openPreviewStudioWithUris(copiedUris)
+            } else {
+                targetProjectFolderForScan = null
+            }
+        } else {
+            targetProjectFolderForScan = null
+        }
+    }
+
+    // ML Kit Document Scanner Launcher (Immediately persists URIs to cache before opening preview so Next never fails)
     private val scannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -63,16 +114,22 @@ class MainActivity : AppCompatActivity() {
             val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
             val pages = scanResult?.pages
             if (!pages.isNullOrEmpty()) {
-                val uriList = ArrayList<String>()
-                for (page in pages) {
-                    uriList.add(page.imageUri.toString())
+                val safeUriList = ArrayList<String>()
+                for ((idx, page) in pages.withIndex()) {
+                    val persistedUri = copyUriToSafeCacheFile(
+                        page.imageUri,
+                        "scan_${System.currentTimeMillis()}_$idx.jpg"
+                    )
+                    if (persistedUri != null) {
+                        safeUriList.add(persistedUri.toString())
+                    }
                 }
-                val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
-                    putStringArrayListExtra("SCAN_URIS", uriList)
-                    putExtra("TARGET_PROJECT_DIR", targetProjectFolderForScan)
+                if (safeUriList.isNotEmpty()) {
+                    openPreviewStudioWithUris(safeUriList)
+                } else {
+                    targetProjectFolderForScan = null
+                    Toast.makeText(this, "Could not read scanned page, please try Camera option.", Toast.LENGTH_SHORT).show()
                 }
-                targetProjectFolderForScan = null
-                startActivity(studioIntent)
             } else {
                 targetProjectFolderForScan = null
             }
@@ -84,7 +141,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Security Point 1: FLAG_SECURE Shield against background screen capture & Recent Apps leak
+        // Security Shield: FLAG_SECURE
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -101,7 +158,6 @@ class MainActivity : AppCompatActivity() {
         ivTabTools = findViewById(R.id.ivTabTools)
         tvTabTools = findViewById(R.id.tvTabTools)
 
-        // Background maintenance: Shred old temp cache files & migrate legacy files without blocking UI
         bgExecutor.execute {
             shredTemporaryCacheFiles()
             migrateAllLegacyDocsToProjectFolders()
@@ -119,10 +175,11 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, AboutActivity::class.java))
         }
 
+        // Clicking Scan button asks cleanly: Smart Auto-Scan / Camera / Gallery
         findViewById<MaterialCardView>(R.id.cardCamScan).setOnClickListener {
             if (isBusyProcessing) return@setOnClickListener
             targetProjectFolderForScan = null
-            startDocumentScanner()
+            showScanSourceChooser()
         }
 
         findViewById<LinearLayout>(R.id.navTabDocs).setOnClickListener {
@@ -162,17 +219,98 @@ class MainActivity : AppCompatActivity() {
         bgExecutor.shutdownNow()
     }
 
-    // Security Point 2: Sandbox storage inside internal filesDir
+    private fun showScanSourceChooser() {
+        val options = arrayOf(
+            "📄 Smart Auto-Crop Scanner",
+            "📷 Direct Phone Camera",
+            "🖼 Choose from Gallery"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Scan Document")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> startSmartMlKitScanner()
+                    1 -> checkPermissionAndLaunchCamera()
+                    2 -> galleryMultiLauncher.launch("image/*")
+                }
+            }
+            .show()
+    }
+
+    private fun checkPermissionAndLaunchCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            launchDirectSystemCamera()
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun launchDirectSystemCamera() {
+        try {
+            val file = File(cacheDir, "cam_scan_${System.currentTimeMillis()}.jpg")
+            tempDirectCamFile = file
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            directCameraLauncher.launch(uri)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Camera open error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun startSmartMlKitScanner() {
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(20)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
+            .build()
+
+        GmsDocumentScanning.getClient(options).getStartScanIntent(this)
+            .addOnSuccessListener { intentSender ->
+                scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+            }
+            .addOnFailureListener {
+                // Automatic fallback to Direct System Camera if ML Kit service is busy
+                checkPermissionAndLaunchCamera()
+            }
+    }
+
+    private fun copyUriToSafeCacheFile(sourceUri: Uri, targetName: String): Uri? {
+        return try {
+            val outFile = File(cacheDir, targetName)
+            contentResolver.openInputStream(sourceUri)?.use { input ->
+                FileOutputStream(outFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            if (outFile.exists() && outFile.length() > 0) {
+                FileProvider.getUriForFile(this, "${packageName}.fileprovider", outFile)
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun openPreviewStudioWithUris(uriList: ArrayList<String>) {
+        val studioIntent = Intent(this, ScanPreviewActivity::class.java).apply {
+            putStringArrayListExtra("SCAN_URIS", uriList)
+            putExtra("TARGET_PROJECT_DIR", targetProjectFolderForScan)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        targetProjectFolderForScan = null
+        startActivity(studioIntent)
+    }
+
     private fun getSecureProjectsRoot(): File {
         val dir = File(filesDir, "DocMitra/Projects")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
 
-    // Security Fix: Automatically shred leftover unencrypted PDFs/images from cacheDir
     private fun shredTemporaryCacheFiles() {
         try {
-            val cutoff = System.currentTimeMillis() - (30 * 60 * 1000L) // Older than 30 mins
+            val cutoff = System.currentTimeMillis() - (30 * 60 * 1000L)
             cacheDir.listFiles()?.forEach { file ->
                 if (file.isFile && (file.extension.equals("pdf", true) || file.extension.equals("jpg", true))) {
                     if (file.lastModified() < cutoff) {
@@ -248,24 +386,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startDocumentScanner() {
-        val options = GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true)
-            .setPageLimit(20)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
-            .build()
-
-        GmsDocumentScanning.getClient(options).getStartScanIntent(this)
-            .addOnSuccessListener { intentSender ->
-                scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
-            }
-            .addOnFailureListener { e ->
-                targetProjectFolderForScan = null
-                Toast.makeText(this, "Scanner initializing, please tap again: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-    }
-
     private fun loadProjectFolders() {
         recentDocsContainer.removeAllViews()
         val root = getSecureProjectsRoot()
@@ -287,9 +407,9 @@ class MainActivity : AppCompatActivity() {
                 text = if (currentSearchQuery.isNotEmpty()) {
                     "No matching document found."
                 } else if (isHindi) {
-                    "नीचे ऑरेंज कैमरा बटन दबाएं → फोटो खींचें → मोहर/साइन लगाएं और '✓ Save HD' दबाएं।"
+                    "नीचे ऑरेंज कैमरा बटन दबाएं → Camera या Gallery चुनें → मोहर/साइन लगाएं और '✓ Save HD' दबाएं।"
                 } else {
-                    "Tap the orange Camera button below to scan, add your Mohar/Sign, and tap '✓ Save HD'."
+                    "Tap the orange Camera button below to choose Camera or Gallery, add Mohar/Sign, and Save HD."
                 }
                 setTextColor(0xFF64748B.toInt())
                 textSize = 14f
@@ -365,7 +485,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val dateStr = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(projDir.lastModified()))
-            val badgeText = "${pages.size} ${if (pages.size == 1) "Page" else "Pages"}"
+            val badgeText = "${pages.size}${if (pages.size == 1) "Page" else "Pages"}"
 
             val subTv = TextView(this).apply {
                 text = "$dateStr • $badgeText • HD"
@@ -433,7 +553,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     1 -> {
                         targetProjectFolderForScan = projDir.absolutePath
-                        startDocumentScanner()
+                        showScanSourceChooser()
                     }
                     2 -> promptRenameProject(projDir)
                     3 -> shareProjectAsPdfAsync(projDir, pages)
@@ -447,7 +567,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // Security Point 3: Input validation against Path Traversal
     private fun promptRenameProject(projDir: File) {
         val input = EditText(this).apply {
             setText(projDir.name)
@@ -476,7 +595,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // Zero-ANR Background PDF Builder with memory recycling for 50+ pages
     private fun shareProjectAsPdfAsync(projDir: File, pages: List<File>) {
         if (isBusyProcessing) return
         isBusyProcessing = true
