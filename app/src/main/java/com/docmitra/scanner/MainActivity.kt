@@ -150,7 +150,6 @@ class MainActivity : AppCompatActivity() {
         return dir
     }
 
-    // Automatically converts older single/PDF files into high-speed HD Project Folders inside sandbox
     private fun migrateAllLegacyDocsToProjectFolders() {
         val projectsRoot = getSecureProjectsRoot()
         val legacyDirs = listOf(
@@ -219,7 +218,7 @@ class MainActivity : AppCompatActivity() {
             .setGalleryImportAllowed(true)
             .setPageLimit(20)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE_WITH_FILTER)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_BASE)
             .build()
 
         GmsDocumentScanning.getClient(options).getStartScanIntent(this)
@@ -331,7 +330,6 @@ class MainActivity : AppCompatActivity() {
             }
 
             val dateStr = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(projDir.lastModified()))
-            val totalKb = (pages.sumOf { it.length() } / 1024).coerceAtLeast(1)
             val badgeText = "${pages.size} ${if (pages.size == 1) "Page" else "Pages"}"
 
             val subTv = TextView(this).apply {
